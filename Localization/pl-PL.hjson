@@ -1,3 +1,6 @@
-Mods.SubworldLibrary: {
-	Return: Wracać
+Mods: {
+	SubworldLibrary: {
+		Return: Wracać
+		// Move: "{0} has gone to {1}."
+	}
 }
