@@ -685,8 +685,6 @@ namespace SubworldLibrary
 
 		private static void PrepareMessageBuffer(MessageBuffer buffer)
 		{
-			ModContent.GetInstance<SubworldLibrary>().Logger.Debug("POS:" + buffer.reader.BaseStream.Position);
-
 			int start = 0;
 			int totalData = buffer.totalData;
 			int writePosition = 0;
