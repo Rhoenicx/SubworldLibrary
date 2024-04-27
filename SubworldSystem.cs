@@ -134,6 +134,38 @@ namespace SubworldLibrary
 		}
 	}
 
+	internal class ServerMessageBuffer
+	{
+		public const int MaxBufferLength = 131070;
+		public byte[] buffer = new byte[MaxBufferLength];
+
+		public int dataAmount;
+		public bool dataReady;
+
+		public MemoryStream stream;
+		public BinaryReader reader;
+
+		public ServerMessageBuffer()
+		{
+			Reset();
+		}
+
+		public void Reset()
+		{
+			Array.Clear(buffer, 0, buffer.Length);
+			dataAmount = 0;
+			dataReady = false;
+			ResetReader();
+		}
+
+		public void ResetReader() 
+		{
+			stream?.Close();
+			stream = new MemoryStream(buffer);
+			reader = new BinaryReader(stream);
+		}
+	}
+
 	public class SubworldSystem : ModSystem
 	{
 		internal static List<Subworld> subworlds;
@@ -147,8 +179,15 @@ namespace SubworldLibrary
 		internal static Dictionary<ISocket, int> playerLocations;
 		internal static Dictionary<int, SubserverLink> links;
 
+		internal static ServerMessageBuffer serverMessageBuffer;
+
 		public override void OnModLoad()
 		{
+			if (Main.dedServ)
+			{
+				serverMessageBuffer = new ServerMessageBuffer();
+			}
+
 			subworlds = new List<Subworld>();
 			Player.Hooks.OnEnterWorld += OnEnterWorld;
 			Netplay.OnDisconnect += OnDisconnect;
@@ -156,6 +195,7 @@ namespace SubworldLibrary
 
 		public override void Unload()
 		{
+			serverMessageBuffer = null;
 			Player.Hooks.OnEnterWorld -= OnEnterWorld;
 			Netplay.OnDisconnect -= OnDisconnect;
 		}
@@ -279,6 +319,7 @@ namespace SubworldLibrary
 			}
 
 			ModPacket packet = ModContent.GetInstance<SubworldLibrary>().GetPacket();
+			packet.Write((byte)SubLibMessageType.BeginEntering);
 			packet.Write(index < 0 ? ushort.MaxValue : (ushort)index);
 			packet.Send();
 		}
@@ -351,11 +392,11 @@ namespace SubworldLibrary
 				byte[] data;
 				if (ModNet.NetModCount < 256)
 				{
-					data = new byte[6] { (byte)player, 5, 0, 250, (byte)subLib.NetID, (byte)subLib.NetID };
+					data = new byte[6] { (byte)player, 5, 0, 250, (byte)subLib.NetID, (byte)SubLibMessageType.MovePlayerOnServer };
 				}
 				else
 				{
-					data = new byte[8] { (byte)player, 7, 0, 250, (byte)subLib.NetID, (byte)(subLib.NetID >> 8), (byte)subLib.NetID, (byte)(subLib.NetID >> 8) };
+					data = new byte[7] { (byte)player, 7, 0, 250, (byte)subLib.NetID, (byte)(subLib.NetID >> 8), (byte)SubLibMessageType.MovePlayerOnServer };
 				}
 				links[location].Send(data);
 
@@ -366,6 +407,7 @@ namespace SubworldLibrary
 					client.ResetSections();
 
 					ModPacket leavePacket = subLib.GetPacket();
+					leavePacket.Write((byte)SubLibMessageType.MovePlayerOnClient);
 					leavePacket.Write(id);
 					leavePacket.Send(player);
 
@@ -378,6 +420,7 @@ namespace SubworldLibrary
 			}
 
 			ModPacket enterPacket = subLib.GetPacket();
+			enterPacket.Write((byte)SubLibMessageType.MovePlayerOnClient);
 			enterPacket.Write(id);
 			enterPacket.Send(player);
 
@@ -407,11 +450,11 @@ namespace SubworldLibrary
 			byte[] data; // client, (ushort) size, packet id, (byte/ushort) sublib net id twice (read a second time by sublib to sync a leaving client)
 			if (ModNet.NetModCount < 256)
 			{
-				data = new byte[6] { (byte)player, 5, 0, 250, (byte)netId, (byte)netId };
+				data = new byte[6] { (byte)player, 5, 0, 250, (byte)netId, (byte)SubLibMessageType.MovePlayerOnServer};
 			}
 			else
 			{
-				data = new byte[8] { (byte)player, 7, 0, 250, (byte)netId, (byte)(netId >> 8), (byte)netId, (byte)(netId >> 8) };
+				data = new byte[7] { (byte)player, 7, 0, 250, (byte)netId, (byte)(netId >> 8), (byte)SubLibMessageType.MovePlayerOnServer };
 			}
 
 			foreach (SubserverLink link in links.Values)
@@ -494,7 +537,7 @@ namespace SubworldLibrary
 			return int.MinValue;
 		}
 
-		private static byte[] GetPacketHeader(int size, int mod)
+		private static byte[] GetPacketHeader(int size, int mod, SubLibMessageType type)
 		{
 			byte[] packet = new byte[size];
 
@@ -508,14 +551,20 @@ namespace SubworldLibrary
 
 			short subLib = ModContent.GetInstance<SubworldLibrary>().NetID;
 
-			packet[i++] = (byte)subLib;
-			if (ModNet.NetModCount >= 256)
+			if (ModNet.NetModCount < 256)
 			{
-				packet[i++] = (byte)(subLib >> 8);
-				packet[i + 1] = (byte)(mod >> 8);
+				packet[i++] = (byte)subLib;
+				packet[i++] = (byte)type;
+				packet[i++] = (byte)mod;
 			}
-
-			packet[i] = (byte)mod;
+			else
+			{
+				packet[i++] = (byte)subLib;
+				packet[i++] = (byte)(subLib >> 8);
+				packet[i++] = (byte)type;
+				packet[i++] = (byte)mod;
+				packet[i++] = (byte)(mod >> 8);
+			}
 
 			return packet;
 		}
@@ -526,10 +575,13 @@ namespace SubworldLibrary
 		/// </summary>
 		public static void SendToSubserver(int subserver, Mod mod, byte[] data)
 		{
-			int header = ModNet.NetModCount < 256 ? 6 : 8;
-			byte[] packet = GetPacketHeader(data.Length + header, mod.NetID);
-			Buffer.BlockCopy(data, 0, packet, header, data.Length);
-			links[subserver].Send(packet);
+			if (Main.netMode == 2 && current == null && links.ContainsKey(subserver))
+			{
+				int header = ModNet.NetModCount < 256 ? 7 : 9;
+				byte[] packet = GetPacketHeader(data.Length + header, mod.NetID, SubLibMessageType.SendToSubserver);
+				Buffer.BlockCopy(data, 0, packet, header, data.Length);
+				links[subserver].Send(packet);
+			}
 		}
 
 		/// <summary>
@@ -537,13 +589,16 @@ namespace SubworldLibrary
 		/// </summary>
 		public static void SendToAllSubservers(Mod mod, byte[] data)
 		{
-			int header = ModNet.NetModCount < 256 ? 6 : 8;
-			byte[] packet = GetPacketHeader(data.Length + header, mod.NetID);
-			Buffer.BlockCopy(data, 0, packet, header, data.Length);
-
-			foreach (SubserverLink link in links.Values)
+			if (Main.netMode == 2 && current == null)
 			{
-				link.Send(packet);
+				int header = ModNet.NetModCount < 256 ? 7 : 9;
+				byte[] packet = GetPacketHeader(data.Length + header, mod.NetID, SubLibMessageType.SendToSubserver);
+				Buffer.BlockCopy(data, 0, packet, header, data.Length);
+
+				foreach (SubserverLink link in links.Values)
+				{
+					link.Send(packet);
+				}
 			}
 		}
 
@@ -552,15 +607,18 @@ namespace SubworldLibrary
 		/// </summary>
 		public static void SendToAllSubserversFromMod(Mod mod, byte[] data)
 		{
-			int header = ModNet.NetModCount < 256 ? 6 : 8;
-			byte[] packet = GetPacketHeader(data.Length + header, mod.NetID);
-			Buffer.BlockCopy(data, 0, packet, header, data.Length);
-
-			foreach (KeyValuePair<int, SubserverLink> pair in links)
+			if (Main.netMode == 2 && current == null)
 			{
-				if (subworlds[pair.Key].Mod == mod)
+				int header = ModNet.NetModCount < 256 ? 7 : 9;
+				byte[] packet = GetPacketHeader(data.Length + header, mod.NetID, SubLibMessageType.SendToSubserver);
+				Buffer.BlockCopy(data, 0, packet, header, data.Length);
+
+				foreach (KeyValuePair<int, SubserverLink> pair in links)
 				{
-					pair.Value.Send(packet);
+					if (subworlds[pair.Key].Mod == mod)
+					{
+						pair.Value.Send(packet);
+					}
 				}
 			}
 		}
@@ -570,10 +628,13 @@ namespace SubworldLibrary
 		/// </summary>
 		public static void SendToMainServer(Mod mod, byte[] data)
 		{
-			int header = ModNet.NetModCount < 256 ? 6 : 8;
-			byte[] packet = GetPacketHeader(data.Length + header, mod.NetID);
-			Buffer.BlockCopy(data, 0, packet, header, data.Length);
-			SubserverSocket.pipe.Write(packet);
+			if (Main.netMode == 2 && current != null)
+			{
+				int header = ModNet.NetModCount < 256 ? 7 : 9;
+				byte[] packet = GetPacketHeader(data.Length + header, mod.NetID, SubLibMessageType.SendToMainServer);
+				Buffer.BlockCopy(data, 0, packet, header, data.Length);
+				SubserverSocket.pipe.Write(packet);
+			}
 		}
 
 		/// <summary>
@@ -906,17 +967,41 @@ namespace SubworldLibrary
 
 					if (data[2] == 250 && (ModNet.NetModCount < 256 ? data[3] : BitConverter.ToUInt16(data, 3)) == ModContent.GetInstance<SubworldLibrary>().NetID)
 					{
-						MemoryStream stream = new MemoryStream(data);
-						using BinaryReader reader = new BinaryReader(stream);
-						if (ModNet.NetModCount < 256)
+						SubLibMessageType messageType = (SubLibMessageType)data[ModNet.NetModCount < 256 ? 4 : 5];
+
+						if (messageType == SubLibMessageType.SendToMainServer
+							|| messageType == SubLibMessageType.SendToSubserver)
 						{
-							stream.Position = 5;
-							ModNet.GetMod(data[4]).HandlePacket(reader, 256);
+							lock (serverMessageBuffer)
+							{
+								while (serverMessageBuffer.dataAmount + length > serverMessageBuffer.buffer.Length)
+								{
+									Monitor.Exit(serverMessageBuffer);
+									Thread.Yield();
+									Monitor.Enter(serverMessageBuffer);
+								}
+
+								Buffer.BlockCopy(data, 0, serverMessageBuffer.buffer, serverMessageBuffer.dataAmount, length);
+								serverMessageBuffer.dataAmount += length;
+								serverMessageBuffer.dataReady = true;
+							}
 						}
 						else
 						{
-							stream.Position = 6;
-							ModNet.GetMod(BitConverter.ToUInt16(data, 5)).HandlePacket(reader, 256);
+							MessageBuffer buffer = NetMessage.buffer[packetInfo[0]];
+							lock (buffer)
+							{
+								while (buffer.totalData + length > buffer.readBuffer.Length)
+								{
+									Monitor.Exit(buffer);
+									Thread.Yield();
+									Monitor.Enter(buffer);
+								}
+
+								Buffer.BlockCopy(data, 0, buffer.readBuffer, buffer.totalData, length);
+								buffer.totalData += length;
+								buffer.checkBytes = true;
+							}
 						}
 					}
 					else
@@ -998,34 +1083,59 @@ namespace SubworldLibrary
 						break;
 					}
 
-					MessageBuffer buffer = NetMessage.buffer[packetInfo[0]];
-					int length = BitConverter.ToUInt16(packetInfo, 1);
+					byte low = packetInfo[1];
+					byte high = packetInfo[2];
+					int length = (high << 8) | low;
 
-					lock (buffer)
+					byte[] data = new byte[length];
+					pipe.Read(data, 2, length - 2);
+					data[0] = low;
+					data[1] = high;
+
+					if (data[2] == 250 && (ModNet.NetModCount < 256 ? data[3] : BitConverter.ToUInt16(data, 3)) == ModContent.GetInstance<SubworldLibrary>().NetID
+						&& ((SubLibMessageType)data[ModNet.NetModCount < 256 ? 4 : 5] == SubLibMessageType.SendToMainServer
+						|| (SubLibMessageType)data[ModNet.NetModCount < 256 ? 4 : 5] == SubLibMessageType.SendToSubserver))
 					{
-						while (buffer.totalData + length > buffer.readBuffer.Length)
+						lock (serverMessageBuffer)
 						{
-							Monitor.Exit(buffer);
-							Thread.Yield();
-							Monitor.Enter(buffer);
-						}
-
-						//TODO: is there a race condition here? will removing this statement make it more frequent?
-						if (!Netplay.Clients[buffer.whoAmI].IsActive)
-						{
-							if (Netplay.Clients[buffer.whoAmI].Socket == null)
+							while (serverMessageBuffer.dataAmount + length > serverMessageBuffer.buffer.Length)
 							{
-								Netplay.Clients[buffer.whoAmI].Socket = new SubserverSocket(buffer.whoAmI);
+								Monitor.Exit(serverMessageBuffer);
+								Thread.Yield();
+								Monitor.Enter(serverMessageBuffer);
 							}
-							Netplay.Clients[buffer.whoAmI].IsActive = true;
+
+							Buffer.BlockCopy(data, 0, serverMessageBuffer.buffer, serverMessageBuffer.dataAmount, length);
+							serverMessageBuffer.dataAmount += length;
+							serverMessageBuffer.dataReady = true;
 						}
+					}
+					else
+					{
+						MessageBuffer buffer = NetMessage.buffer[packetInfo[0]];
+						lock (buffer)
+						{
+							while (buffer.totalData + length > buffer.readBuffer.Length)
+							{
+								Monitor.Exit(buffer);
+								Thread.Yield();
+								Monitor.Enter(buffer);
+							}
 
-						buffer.readBuffer[buffer.totalData] = packetInfo[1];
-						buffer.readBuffer[buffer.totalData + 1] = packetInfo[2];
-						pipe.Read(buffer.readBuffer, buffer.totalData + 2, length - 2);
+							//TODO: is there a race condition here? will removing this statement make it more frequent?
+							if (!Netplay.Clients[buffer.whoAmI].IsActive)
+							{
+								if (Netplay.Clients[buffer.whoAmI].Socket == null)
+								{
+									Netplay.Clients[buffer.whoAmI].Socket = new SubserverSocket(buffer.whoAmI);
+								}
+								Netplay.Clients[buffer.whoAmI].IsActive = true;
+							}
 
-						buffer.totalData += length;
-						buffer.checkBytes = true;
+							Buffer.BlockCopy(data, 0, buffer.readBuffer, buffer.totalData, length);
+							buffer.totalData += length;
+							buffer.checkBytes = true;
+						}
 					}
 				}
 			}
@@ -1143,6 +1253,67 @@ namespace SubworldLibrary
 			else
 			{
 				NetMessage.SendData(1);
+			}
+		}
+
+		private static void ProcessServerMessageBuffer()
+		{
+			if (!serverMessageBuffer.dataReady)
+			{
+				return;
+			}
+
+			bool lockTaken = false;
+			try
+			{
+				Monitor.Enter(serverMessageBuffer, ref lockTaken);
+
+				int start = 0;
+				int amount = serverMessageBuffer.dataAmount;
+
+				try
+				{
+					while (amount >= 2)
+					{
+						int length = BitConverter.ToUInt16(serverMessageBuffer.buffer, start);
+
+						if (amount < length)
+						{
+							break;
+						}
+
+						if (serverMessageBuffer.buffer[start + 2] == 250 && (ModNet.NetModCount < 256 ? serverMessageBuffer.buffer[start + 3] : BitConverter.ToUInt16(serverMessageBuffer.buffer, 3)) == ModContent.GetInstance<SubworldLibrary>().NetID)
+						{
+							int header = ModNet.NetModCount < 256 ? 4 : 5;
+							serverMessageBuffer.reader.BaseStream.Position = start + header;
+							ModContent.GetInstance<SubworldLibrary>().HandlePacket(serverMessageBuffer.reader, 255);
+						}
+
+						amount -= length;
+						start += length;
+					}
+				}
+				catch
+				{ 
+				}
+
+				if (amount != serverMessageBuffer.dataAmount)
+				{
+					for (int index = 0; index < amount; ++index)
+					{
+						serverMessageBuffer.buffer[index] = serverMessageBuffer.buffer[index + start];
+					}
+					serverMessageBuffer.dataAmount = amount;
+				}
+
+				serverMessageBuffer.dataReady = false;
+			}
+			finally
+			{
+				if (lockTaken)
+				{
+					Monitor.Exit(serverMessageBuffer);
+				}
 			}
 		}
 

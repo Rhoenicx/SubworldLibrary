@@ -127,6 +127,12 @@ namespace SubworldLibrary
 					c.Emit(Ret);
 				};
 
+				IL_Netplay.UpdateServerInMainThread += il =>
+				{
+					ILCursor c = new(il) { Index = il.Body.Instructions.Count - 1 };
+					c.Emit(OpCodes.Call, typeof(SubworldSystem).GetMethod("ProcessServerMessageBuffer", BindingFlags.NonPublic | BindingFlags.Static));
+				};
+
 				IL_NetMessage.CheckBytes += il =>
 				{
 					ILCursor c;
@@ -679,6 +685,8 @@ namespace SubworldLibrary
 
 		private static void PrepareMessageBuffer(MessageBuffer buffer)
 		{
+			ModContent.GetInstance<SubworldLibrary>().Logger.Debug("POS:" + buffer.reader.BaseStream.Position);
+
 			int start = 0;
 			int totalData = buffer.totalData;
 			int writePosition = 0;
@@ -854,40 +862,72 @@ namespace SubworldLibrary
 
 		public override void HandlePacket(BinaryReader reader, int whoAmI)
 		{
-			if (Main.netMode == 2)
-			{
-				RemoteClient client;
+			SubLibMessageType messageType = (SubLibMessageType)reader.ReadByte();
 
-				if (SubworldSystem.current != null)
-				{
-					int mod = ModNet.NetModCount < 256 ? reader.ReadByte() : reader.ReadUInt16();
-					if (mod != NetID)
+			switch (messageType)
+			{
+				// Always sent from client => main server
+				case SubLibMessageType.BeginEntering:
 					{
-						ModNet.GetMod(mod).HandlePacket(reader, 256);
-						return;
+						ushort id = reader.ReadUInt16();
+
+						if (Main.netMode == 2 && !SubworldSystem.noReturn)
+						{
+							SubworldSystem.MovePlayerToSubserver(whoAmI, id);
+						}
 					}
+					break;
 
-					Netplay.Clients[whoAmI].Reset();
 
-					NetMessage.SendData(14, -1, whoAmI, null, whoAmI, 0);
-					ChatHelper.BroadcastChatMessage(NetworkText.FromKey(Lang.mp[20].Key, Netplay.Clients[whoAmI].Name), new Color(255, 240, 20), whoAmI);
-					Player.Hooks.PlayerDisconnect(whoAmI);
+				// Sent from main server => sub server
+				case SubLibMessageType.MovePlayerOnServer:
+					{
+						if (Main.netMode == 2 && SubworldSystem.current != null)
+						{
+							Netplay.Clients[whoAmI].Reset();
 
-					CheckClients();
-					return;
-				}
+							NetMessage.SendData(14, -1, whoAmI, null, whoAmI, 0);
+							ChatHelper.BroadcastChatMessage(NetworkText.FromKey(Lang.mp[20].Key, Netplay.Clients[whoAmI].Name), new Color(255, 240, 20), whoAmI);
+							Player.Hooks.PlayerDisconnect(whoAmI);
 
-				ushort id = reader.ReadUInt16();
-				if (!SubworldSystem.noReturn)
-				{
-					SubworldSystem.MovePlayerToSubserver(whoAmI, id);
-				}
-			}
-			else
-			{
-				ushort id = reader.ReadUInt16();
-				Task.Factory.StartNew(SubworldSystem.ExitWorldCallBack, id < ushort.MaxValue ? id : -1);
+							CheckClients();
+						}
+					}
+					break;
+
+
+				// Sent from main server => client
+				case SubLibMessageType.MovePlayerOnClient: 
+					{
+						ushort id = reader.ReadUInt16();
+
+						if (Main.netMode == 1)
+						{ 
+							Task.Factory.StartNew(SubworldSystem.ExitWorldCallBack, id < ushort.MaxValue ? id : -1);
+						}
+					}
+					break;
+
+
+				// SendToMainServer: Sent from any sub server => main server
+				// SendToSubserver: Sent from main server => this sub server
+				case SubLibMessageType.SendToMainServer:				
+				case SubLibMessageType.SendToSubserver:
+					{
+						ModNet.GetMod(ModNet.NetModCount < 256 ? reader.ReadByte() : reader.ReadInt16()).HandlePacket(reader, whoAmI);
+					}
+					break;
 			}
 		}
+	}
+
+	public enum SubLibMessageType : byte
+	{
+		None = 0, // Fail-safe: we should not use 0
+		BeginEntering,
+		MovePlayerOnServer,
+		MovePlayerOnClient,
+		SendToMainServer,
+		SendToSubserver,
 	}
 }
