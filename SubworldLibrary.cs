@@ -3,6 +3,7 @@ using Mono.Cecil.Cil;
 using MonoMod.Cil;
 using MonoMod.RuntimeDetour;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
@@ -123,6 +124,26 @@ namespace SubworldLibrary
 					c.Emit(OpCodes.Call, typeof(SystemLoader).GetMethod("OnWorldUnload"));
 
 					c.Emit(Ret);
+				};
+
+				IL_NetMessage.CheckBytes += il =>
+				{
+					ILCursor c;
+					if (!(c = new(il)).TryGotoNext(
+						x => x.MatchLdloc(3),
+						x => x.MatchLdcI4(0),
+						x => x.MatchBle(out _),
+						x => x.MatchLdsfld(typeof(ModNet), "DetailedLogging"),
+						x => x.MatchBrfalse(out _)))
+					{
+						Logger.Error("FAILED:");
+						return;
+					}
+
+					c.Emit(Ldsfld, typeof(NetMessage).GetField("buffer"));
+					c.Emit(Ldarg_0);
+					c.Emit(Ldelem_Ref);
+					c.Emit(OpCodes.Call, typeof(SubworldLibrary).GetMethod("PrepareMessageBuffer", BindingFlags.NonPublic | BindingFlags.Static));
 				};
 
 				if (!Program.LaunchParameters.ContainsKey("-subworld"))
@@ -632,6 +653,47 @@ namespace SubworldLibrary
 
 				c.MarkLabel(skip);
 			};
+		}
+
+		private static void PrepareMessageBuffer(MessageBuffer buffer)
+		{
+			int start = 0;
+			int totalData = buffer.totalData;
+			int writePosition = 0;
+			List<byte> bytes = new();
+
+			while (totalData >= 2)
+			{
+				int length = (int)BitConverter.ToInt16(buffer.readBuffer, start);
+
+				if (totalData < length)
+				{
+					continue;
+				}
+				
+				if (buffer.readBuffer[start + 2] != 250
+						|| (ModNet.NetModCount < 256 && buffer.readBuffer[start + 3] != (byte)ModContent.GetInstance<SubworldLibrary>().NetID)
+						|| (ModNet.NetModCount >= 256 && BitConverter.ToUInt16(buffer.readBuffer, start + 3) != ModContent.GetInstance<SubworldLibrary>().NetID))
+				{
+					totalData -= length;
+					start += length;
+					continue;
+				}
+
+				for (int i = start; i < start + length; i++)
+				{
+					bytes.Add(buffer.readBuffer[i]);
+				}
+
+				totalData -= length;
+				Buffer.BlockCopy(buffer.readBuffer, start + length, buffer.readBuffer, start, totalData);
+				writePosition = start + totalData;
+			}
+
+			for (int i = 0; i < bytes.Count; i++)
+			{
+				buffer.readBuffer[writePosition + i] = bytes[i];
+			}
 		}
 
 		private static bool DenyRead(MessageBuffer buffer, int start, int length)
