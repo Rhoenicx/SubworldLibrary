@@ -27,6 +27,7 @@ namespace SubworldLibrary
 	{
 		private static ILHook tcpSocketHook;
 		private static ILHook socialSocketHook;
+		private static ILHook handleModPacketHook;
 
 		public override void Load()
 		{
@@ -145,6 +146,27 @@ namespace SubworldLibrary
 					c.Emit(Ldelem_Ref);
 					c.Emit(OpCodes.Call, typeof(SubworldLibrary).GetMethod("PrepareMessageBuffer", BindingFlags.NonPublic | BindingFlags.Static));
 				};
+
+				handleModPacketHook = new ILHook(typeof(ModNet).GetMethod("HandleModPacket", BindingFlags.Static | BindingFlags.NonPublic), HandleModPacket);
+
+				void HandleModPacket(ILContext il)
+				{
+					ILCursor c = new ILCursor(il);
+					ILLabel label = c.DefineLabel();
+
+					if (!c.TryGotoNext(MoveType.Before, i => i.MatchLdsfld(typeof(ModNet), "ReadUnderflowBypass"), i => i.MatchBrtrue(out label)))
+					{
+						Logger.Error("FAILED:");
+						return;
+					}
+
+					c.Emit(Ldsfld, typeof(Netplay).GetField("Clients", BindingFlags.Static | BindingFlags.Public));
+					c.Emit(Ldarg, 1);
+					c.Emit(Ldelem_Ref);
+					c.Emit(Ldfld, typeof(RemoteClient).GetField("State", BindingFlags.Instance | BindingFlags.Public));
+					c.Emit(Ldc_I4, 0);
+					c.Emit(Ble, label);
+				}
 
 				if (!Program.LaunchParameters.ContainsKey("-subworld"))
 				{
