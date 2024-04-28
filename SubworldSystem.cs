@@ -1253,6 +1253,7 @@ namespace SubworldLibrary
 			else
 			{
 				NetMessage.SendData(1);
+				Main.autoPass = true;
 			}
 		}
 
