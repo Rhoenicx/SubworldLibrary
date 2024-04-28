@@ -1113,6 +1113,14 @@ namespace SubworldLibrary
 					else
 					{
 						MessageBuffer buffer = NetMessage.buffer[packetInfo[0]];
+
+						// Intentional packet leak: block everything besides Hello when not
+						// successfully logged in (yet). Prevents server from booting the client.
+						if (Netplay.Clients[buffer.whoAmI].State == 0 && data[2] != 1)
+						{
+							continue;
+						}
+
 						lock (buffer)
 						{
 							while (buffer.totalData + length > buffer.readBuffer.Length)

@@ -732,7 +732,9 @@ namespace SubworldLibrary
 			}
 			if (!SubworldSystem.playerLocations.TryGetValue(Netplay.Clients[buffer.whoAmI].Socket, out int id))
 			{
-				return false;
+				// Intentional packet leak: block everything besides Hello when not
+				// successfully logged in (yet). Prevents server from booting the client.
+				return Netplay.Clients[buffer.whoAmI].State == 0 && buffer.readBuffer[start + 2] != 1;
 			}
 
 			SubserverLink link = SubworldSystem.links[id];
@@ -742,17 +744,19 @@ namespace SubworldLibrary
 			}
 
 			RemoteClient client = Netplay.Clients[buffer.whoAmI];
-			if (client.State < 1 && buffer.readBuffer[start + 2] != 1)
-			{
-				return true; //TODO: attempt to fix packet leaks properly
-			}
-
 			client.TimeOutTimer = 0;
 
 			byte[] packet = new byte[length + 1];
 			packet[0] = (byte)buffer.whoAmI;
 			Buffer.BlockCopy(buffer.readBuffer, start, packet, 1, length);
 			link.Send(packet);
+
+			// Intentional packet leak: block everything besides Hello when not
+			// successfully logged in (yet). Prevents server from booting the client.
+			if (client.State < 1 && buffer.readBuffer[start + 2] != 1)
+			{
+				return true;
+			}
 
 			if (packet[3] == 82)
 			{
