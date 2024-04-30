@@ -15,6 +15,7 @@ using Terraria.GameContent;
 using Terraria.GameContent.Bestiary;
 using Terraria.GameContent.Creative;
 using Terraria.GameContent.Events;
+using Terraria.GameContent.UI.Chat;
 using Terraria.Graphics.Capture;
 using Terraria.ID;
 using Terraria.IO;
@@ -213,15 +214,43 @@ namespace SubworldLibrary
 		public static bool hideUnderworld;
 
 		/// <summary>
-		/// Whether the current (sub)world should forward chat to other server. 
-		/// True by default: send chat to other servers
+		/// Multiplayer specific: <br/>
+		/// Whether the current (sub)world should send broadcasts (chat) to other worlds.
+		/// True by default: send broadcasts to other servers
 		/// </summary>
-		public static bool sendChatToOtherServers = true;
+		public static bool sendBroadcasts = true;
+
+		/// <summary>
+		/// Multiplayer specific: <br/>
+		/// Whether the current (sub)world should receive broadcasts (chat) from other worlds.
+		/// Regardless of this setting, a world will always receive broadcast packets.
+		/// Setting this to false makes this world not forward the packet to its connected clients.
+		/// True by default: receive broadcasts from other worlds
+		/// </summary>
+		public static bool receiveBroadcasts = true;
+
+		/// <summary>
+		/// Multiplayer specific: <br/>
+		/// Specify a list of (sub)world ID's which broadcasts should be blocked on this world.
+		/// Regardless of this setting, a world will always receive broadcast packets.
+		/// For each (sub)world ID present in this list this world will not forward the packets
+		/// originating from the specified (sub)world ID to conntected clients.
+		/// Empty list by default: allow all broadcasts to go through.
+		/// <br/><see cref="receiveBroadcasts"/> overrules this List when set to false.
+		/// </summary>
+		public static List<int> broadcastDenyList = new();
 
 		/// <summary>
 		/// The current subworld.
 		/// </summary>
 		public static Subworld Current => current;
+
+		/// <summary>
+		/// The current subworld's index in the subworlds list.
+		/// Returns -1 if this is the main server.
+		/// </summary>
+		public static int CurrentIndex => current != null && subworlds.Contains(current) ? subworlds.IndexOf(current) : -1;
+
 		/// <summary>
 		/// Returns true if the current subworld's ID matches the specified ID.
 		/// <code>SubworldSystem.IsActive("MyMod/MySubworld")</code>
@@ -977,7 +1006,7 @@ namespace SubworldLibrary
 
 					if (subLibPacket && (messageType == SubLibMessageType.SendToMainServer
 						|| messageType == SubLibMessageType.SendToSubserver
-						|| messageType == SubLibMessageType.SynchronizeChatMessage))
+						|| messageType == SubLibMessageType.BroadcastBetweenServers))
 					{
 						lock (serverMessageBuffer)
 						{
@@ -993,7 +1022,7 @@ namespace SubworldLibrary
 							serverMessageBuffer.dataReady = true;
 						}
 					}
-					else if (subLibPacket && messageType != SubLibMessageType.ChatMessage)
+					else if (subLibPacket && messageType != SubLibMessageType.Broadcast)
 					{
 						MessageBuffer buffer = NetMessage.buffer[packetInfo[0]];
 						lock (buffer)
@@ -1101,7 +1130,7 @@ namespace SubworldLibrary
 					if (data[2] == 250 && (ModNet.NetModCount < 256 ? data[3] : BitConverter.ToUInt16(data, 3)) == ModContent.GetInstance<SubworldLibrary>().NetID
 						&& ((SubLibMessageType)data[ModNet.NetModCount < 256 ? 4 : 5] == SubLibMessageType.SendToMainServer
 						|| (SubLibMessageType)data[ModNet.NetModCount < 256 ? 4 : 5] == SubLibMessageType.SendToSubserver
-						|| (SubLibMessageType)data[ModNet.NetModCount < 256 ? 4 : 5] == SubLibMessageType.SynchronizeChatMessage))
+						|| (SubLibMessageType)data[ModNet.NetModCount < 256 ? 4 : 5] == SubLibMessageType.BroadcastBetweenServers))
 					{
 						lock (serverMessageBuffer)
 						{
@@ -1652,54 +1681,82 @@ namespace SubworldLibrary
 			NPC.SetWorldSpecificMonstersByWorldID();
 		}
 
-		internal static void SynchoronizeChatMessages(byte messageAuthor, NetworkText text, Color color, int excludedPlayer, bool forward = false, ushort subworldID = ushort.MaxValue)
+		internal static void BroadcastBetweenServers(byte messageAuthor, NetworkText text, Color color, ushort worldID, string worldName)
 		{
-			if (sendChatToOtherServers || forward)
+			if (!sendBroadcasts && current == null)
 			{
-				int netId = ModContent.GetInstance<SubworldLibrary>().NetID;
+				return;
+			}
 
-				// Init stream and writer
-				MemoryStream stream = new();
-				BinaryWriter writer = new(stream);
+			int netId = ModContent.GetInstance<SubworldLibrary>().NetID;
 
-				// Write the packet
-				writer.Write((byte)0);
-				writer.Write((ushort)0);
-				writer.Write(MessageID.ModPacket);
-				writer.Write((byte)netId);
-				if (ModNet.NetModCount >= 256)
-				{
-					writer.Write((byte)(netId >> 8));
-				}
-				writer.Write((byte)SubLibMessageType.SynchronizeChatMessage);
-				writer.Write(forward ? subworldID : (current != null && subworlds.Contains(current) ? (ushort)subworlds.IndexOf(current) : ushort.MaxValue));
-				writer.Write(messageAuthor);
+			// Init stream and writer
+			MemoryStream stream = new();
+			BinaryWriter writer = new(stream);
+
+			// Write the packet
+			writer.Write((byte)0);
+			writer.Write((ushort)0);
+			writer.Write((byte)250);
+			writer.Write((byte)netId);
+			if (ModNet.NetModCount >= 256)
+			{
+				writer.Write((byte)(netId >> 8));
+			}
+			writer.Write((byte)SubLibMessageType.BroadcastBetweenServers);
+			writer.Write(worldID);
+			writer.Write(worldName);
+			writer.Write(messageAuthor);
+			if (messageAuthor < byte.MaxValue)
+			{
 				writer.Write(Netplay.Clients[messageAuthor].Name);
-				text.Serialize(writer);
-				writer.WriteRGB(color);
-				writer.Write(excludedPlayer == -1 ? ushort.MaxValue : (ushort)excludedPlayer);
+			}
+			text.Serialize(writer);
+			writer.WriteRGB(color);
 
-				// Convert packet
-				byte[] packet = new byte[stream.Length];
-				Buffer.BlockCopy(stream.GetBuffer(), 0, packet, 0, (int)stream.Length);
-				packet[1] = (byte)(stream.Length - 1);
-				packet[2] = (byte)((stream.Length - 1) >> 8);
+			// Convert packet
+			byte[] packet = new byte[stream.Length];
+			Buffer.BlockCopy(stream.GetBuffer(), 0, packet, 0, (int)stream.Length);
+			packet[1] = (byte)(stream.Length - 1);
+			packet[2] = (byte)((stream.Length - 1) >> 8);
 
-				// Send packet
-				if (current == null)
+			// Send packet
+			if (current == null)
+			{
+				foreach (int i in links.Keys)
 				{
-					foreach (int i in links.Keys)
+					if (i != worldID)
 					{
-						if (i != subworldID)
-						{
-							links[i].Send(packet);
-						}
+						links[i].Send(packet);
 					}
 				}
-				else
-				{
-					SubserverSocket.pipe.Write(packet);
-				}
+			}
+			else if (SubserverSocket.pipe.IsConnected)
+			{
+				SubserverSocket.pipe.Write(packet);
+			}
+		}
+
+		internal static void DisplayMessage(byte messageAuthor, NetworkText text, Color color, string worldName)
+		{
+			string str = text.ToString();
+
+			if (messageAuthor < byte.MaxValue)
+			{
+				Main.player[messageAuthor].chatOverhead.NewMessage(str, Main.PlayerOverheadChatMessageDisplayTime);
+				Main.player[messageAuthor].chatOverhead.color = color;
+				str = NameTagHandler.GenerateTag(Main.player[(int)messageAuthor].name) + " " + str;
+			}
+
+			str = "[" + worldName + "]" +  " " + str;
+
+			if (Main.netMode == 1 && Main.gameMenu)
+			{
+				SubworldLibrary.cacheMessage(str, color);
+			}
+			else
+			{
+				Main.NewTextMultiline(str, c: color);
 			}
 		}
 	}

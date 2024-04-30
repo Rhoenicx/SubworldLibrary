@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -28,6 +29,8 @@ namespace SubworldLibrary
 		private static ILHook tcpSocketHook;
 		private static ILHook socialSocketHook;
 		private static ILHook handleModPacketHook;
+		internal delegate void CacheMessage(string message, Color color);
+		internal static CacheMessage cacheMessage;
 
 		public override void Load()
 		{
@@ -36,12 +39,24 @@ namespace SubworldLibrary
 			FieldInfo hideUnderworld = typeof(SubworldSystem).GetField("hideUnderworld");
 			MethodInfo normalUpdates = typeof(Subworld).GetMethod("get_NormalUpdates");
 			MethodInfo shouldSave = typeof(Subworld).GetMethod("get_ShouldSave");
+			MethodInfo cacheMessageMethod = typeof(ChatHelper).GetMethod("CacheMessage", BindingFlags.Static | BindingFlags.NonPublic);
+			cacheMessage = (CacheMessage)Delegate.CreateDelegate(typeof(CacheMessage), cacheMessageMethod);
 
 			if (Main.dedServ)
 			{
 				On_ChatHelper.BroadcastChatMessageAs += (orig, messageAuthor, text, color, excludedPlayer) =>
 				{
-					SubworldSystem.SynchoronizeChatMessages(messageAuthor, text, color, excludedPlayer);
+					if (SubworldSystem.sendBroadcasts)
+					{
+						int index = SubworldSystem.CurrentIndex;
+						SubworldSystem.BroadcastBetweenServers(
+							messageAuthor,
+							text,
+							color,
+							index == -1 ? ushort.MaxValue : (ushort)index,
+							Main.worldName);
+					}
+
 					orig(messageAuthor, text, color, excludedPlayer);
 				};
 
@@ -182,6 +197,16 @@ namespace SubworldLibrary
 
 				if (!Program.LaunchParameters.ContainsKey("-subworld"))
 				{
+					On_NetMessage.EnsureLocalPlayerIsPresent += (orig) =>
+					{
+						if (SubworldSystem.links != null && SubworldSystem.links.Any())
+						{
+							return;
+						}
+
+						orig();
+					};
+
 					IL_NetMessage.CheckBytes += il =>
 					{
 						ILCursor c, cc;
@@ -691,12 +716,6 @@ namespace SubworldLibrary
 
 		private static void PrepareMessageBuffer(MessageBuffer buffer)
 		{
-			int whoAmI = buffer.whoAmI;
-
-			byte[] logbytes = new byte[buffer.totalData];
-			Buffer.BlockCopy(buffer.readBuffer, 0, logbytes, 0, buffer.totalData);
-			ModContent.GetInstance<SubworldLibrary>().Logger.Debug(whoAmI + " - Buffer: " + BitConverter.ToString(logbytes).Replace("-", ""));
-
 			int start = 0;
 			int totalData = buffer.totalData;
 			int writePosition = 0;
@@ -932,56 +951,65 @@ namespace SubworldLibrary
 					}
 					break;
 
-				// SynchronizeChatMessage: Sent from any server to this server
-				case SubLibMessageType.SynchronizeChatMessage:
+				// BroadcastBetweenServers: Sent from any server to this server
+				case SubLibMessageType.BroadcastBetweenServers:
 					{
-						ushort subworldID = reader.ReadUInt16();
+						ushort worldID = reader.ReadUInt16();
+						string worldName = reader.ReadString();
 						byte messageAuthor = reader.ReadByte();
-						string messageAuthorName = reader.ReadString();
+						string messageAuthorName = "";
+						if (messageAuthor < byte.MaxValue)
+						{
+							messageAuthorName = reader.ReadString();
+						}
 						NetworkText text = NetworkText.Deserialize(reader);
 						Color color = reader.ReadRGB();
-						ushort excludedPlayer = reader.ReadUInt16();
-
-						Logger.Debug("CHAT " + messageAuthorName);
 
 						if (Main.netMode == 2)
 						{
 							// Main server forwards packets to other server
 							if (SubworldSystem.current == null)
 							{
-								SubworldSystem.SynchoronizeChatMessages(
+								SubworldSystem.BroadcastBetweenServers(
 									messageAuthor,
 									text,
 									color,
-									excludedPlayer == ushort.MaxValue ? -1 : excludedPlayer,
-									true,
-									subworldID);
+									worldID,
+									worldName);
 							}
 
-							ModPacket packet = GetPacket();
-							packet.Write((byte)SubLibMessageType.ChatMessage);
-							packet.Write(subworldID);
-							packet.Write(messageAuthor);
-							packet.Write(messageAuthorName);
-							text.Serialize(packet);
-							packet.WriteRGB(color);
-							packet.Write(excludedPlayer);
-							packet.Send(-1, whoAmI);
-							return;
+							// Send the broadcast to connected clients
+							if (SubworldSystem.receiveBroadcasts && !SubworldSystem.broadcastDenyList.Contains(worldID))
+							{
+								ModPacket packet = GetPacket();
+								packet.Write((byte)SubLibMessageType.Broadcast);
+								packet.Write(worldID);
+								packet.Write(worldName);
+								packet.Write(messageAuthor);
+								if (messageAuthor < byte.MaxValue)
+								{
+									packet.Write(messageAuthorName);
+								}
+								text.Serialize(packet);
+								packet.WriteRGB(color);
+								packet.Send(-1, whoAmI);
+							}
 						}
 					}
 					break;
 
-				case SubLibMessageType.ChatMessage:
+				case SubLibMessageType.Broadcast:
 					{
-						ushort subworldID = reader.ReadUInt16();
+						ushort worldID = reader.ReadUInt16();
+						string worldName = reader.ReadString();
 						byte messageAuthor = reader.ReadByte();
-						string messageAuthorName = reader.ReadString();
+						string messageAuthorName = "";
+						if (messageAuthor < byte.MaxValue)
+						{
+							messageAuthorName = reader.ReadString();
+						}
 						NetworkText text = NetworkText.Deserialize(reader);
 						Color color = reader.ReadRGB();
-						ushort excludedPlayer = reader.ReadUInt16();
-
-						Logger.Debug("CHAT CLIENT " + messageAuthorName);
 
 						if (Main.netMode != 1)
 						{
@@ -993,7 +1021,11 @@ namespace SubworldLibrary
 							Main.player[messageAuthor].name = messageAuthorName;
 						}
 
-						ChatHelper.DisplayMessage(text, color, messageAuthor);
+						SubworldSystem.DisplayMessage(
+							messageAuthor,
+							text,
+							color,
+							worldName);
 					}
 					break;
 			}
@@ -1008,7 +1040,7 @@ namespace SubworldLibrary
 		MovePlayerOnClient,
 		SendToMainServer,
 		SendToSubserver,
-		SynchronizeChatMessage,
-		ChatMessage,
+		BroadcastBetweenServers,
+		Broadcast,
 	}
 }
