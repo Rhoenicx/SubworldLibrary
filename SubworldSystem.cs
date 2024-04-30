@@ -16,6 +16,7 @@ using Terraria.GameContent.Bestiary;
 using Terraria.GameContent.Creative;
 using Terraria.GameContent.Events;
 using Terraria.Graphics.Capture;
+using Terraria.ID;
 using Terraria.IO;
 using Terraria.Localization;
 using Terraria.ModLoader;
@@ -210,6 +211,12 @@ namespace SubworldLibrary
 		/// <br/>Its value is reset before <see cref="Subworld.OnEnter"/> is called, and after <see cref="Subworld.OnExit"/> is called.
 		/// </summary>
 		public static bool hideUnderworld;
+
+		/// <summary>
+		/// Whether the current (sub)world should forward chat to other server. 
+		/// True by default: send chat to other servers
+		/// </summary>
+		public static bool sendChatToOtherServers = true;
 
 		/// <summary>
 		/// The current subworld.
@@ -965,43 +972,42 @@ namespace SubworldLibrary
 					data[0] = low;
 					data[1] = high;
 
-					if (data[2] == 250 && (ModNet.NetModCount < 256 ? data[3] : BitConverter.ToUInt16(data, 3)) == ModContent.GetInstance<SubworldLibrary>().NetID)
+					bool subLibPacket = data[2] == 250 && (ModNet.NetModCount < 256 ? data[3] : BitConverter.ToUInt16(data, 3)) == ModContent.GetInstance<SubworldLibrary>().NetID;
+					SubLibMessageType messageType = subLibPacket ? (SubLibMessageType)data[ModNet.NetModCount < 256 ? 4 : 5] : SubLibMessageType.None;
+
+					if (subLibPacket && (messageType == SubLibMessageType.SendToMainServer
+						|| messageType == SubLibMessageType.SendToSubserver
+						|| messageType == SubLibMessageType.SynchronizeChatMessage))
 					{
-						SubLibMessageType messageType = (SubLibMessageType)data[ModNet.NetModCount < 256 ? 4 : 5];
-
-						if (messageType == SubLibMessageType.SendToMainServer
-							|| messageType == SubLibMessageType.SendToSubserver)
+						lock (serverMessageBuffer)
 						{
-							lock (serverMessageBuffer)
+							while (serverMessageBuffer.dataAmount + length > serverMessageBuffer.buffer.Length)
 							{
-								while (serverMessageBuffer.dataAmount + length > serverMessageBuffer.buffer.Length)
-								{
-									Monitor.Exit(serverMessageBuffer);
-									Thread.Yield();
-									Monitor.Enter(serverMessageBuffer);
-								}
-
-								Buffer.BlockCopy(data, 0, serverMessageBuffer.buffer, serverMessageBuffer.dataAmount, length);
-								serverMessageBuffer.dataAmount += length;
-								serverMessageBuffer.dataReady = true;
+								Monitor.Exit(serverMessageBuffer);
+								Thread.Yield();
+								Monitor.Enter(serverMessageBuffer);
 							}
+
+							Buffer.BlockCopy(data, 0, serverMessageBuffer.buffer, serverMessageBuffer.dataAmount, length);
+							serverMessageBuffer.dataAmount += length;
+							serverMessageBuffer.dataReady = true;
 						}
-						else
+					}
+					else if (subLibPacket && messageType != SubLibMessageType.ChatMessage)
+					{
+						MessageBuffer buffer = NetMessage.buffer[packetInfo[0]];
+						lock (buffer)
 						{
-							MessageBuffer buffer = NetMessage.buffer[packetInfo[0]];
-							lock (buffer)
+							while (buffer.totalData + length > buffer.readBuffer.Length)
 							{
-								while (buffer.totalData + length > buffer.readBuffer.Length)
-								{
-									Monitor.Exit(buffer);
-									Thread.Yield();
-									Monitor.Enter(buffer);
-								}
-
-								Buffer.BlockCopy(data, 0, buffer.readBuffer, buffer.totalData, length);
-								buffer.totalData += length;
-								buffer.checkBytes = true;
+								Monitor.Exit(buffer);
+								Thread.Yield();
+								Monitor.Enter(buffer);
 							}
+
+							Buffer.BlockCopy(data, 0, buffer.readBuffer, buffer.totalData, length);
+							buffer.totalData += length;
+							buffer.checkBytes = true;
 						}
 					}
 					else
@@ -1094,7 +1100,8 @@ namespace SubworldLibrary
 
 					if (data[2] == 250 && (ModNet.NetModCount < 256 ? data[3] : BitConverter.ToUInt16(data, 3)) == ModContent.GetInstance<SubworldLibrary>().NetID
 						&& ((SubLibMessageType)data[ModNet.NetModCount < 256 ? 4 : 5] == SubLibMessageType.SendToMainServer
-						|| (SubLibMessageType)data[ModNet.NetModCount < 256 ? 4 : 5] == SubLibMessageType.SendToSubserver))
+						|| (SubLibMessageType)data[ModNet.NetModCount < 256 ? 4 : 5] == SubLibMessageType.SendToSubserver
+						|| (SubLibMessageType)data[ModNet.NetModCount < 256 ? 4 : 5] == SubLibMessageType.SynchronizeChatMessage))
 					{
 						lock (serverMessageBuffer)
 						{
@@ -1643,6 +1650,57 @@ namespace SubworldLibrary
 				Main.StartSlimeRain(false);
 			}
 			NPC.SetWorldSpecificMonstersByWorldID();
+		}
+
+		internal static void SynchoronizeChatMessages(byte messageAuthor, NetworkText text, Color color, int excludedPlayer, bool forward = false, ushort subworldID = ushort.MaxValue)
+		{
+			if (sendChatToOtherServers || forward)
+			{
+				int netId = ModContent.GetInstance<SubworldLibrary>().NetID;
+
+				// Init stream and writer
+				MemoryStream stream = new();
+				BinaryWriter writer = new(stream);
+
+				// Write the packet
+				writer.Write((byte)0);
+				writer.Write((ushort)0);
+				writer.Write(MessageID.ModPacket);
+				writer.Write((byte)netId);
+				if (ModNet.NetModCount >= 256)
+				{
+					writer.Write((byte)(netId >> 8));
+				}
+				writer.Write((byte)SubLibMessageType.SynchronizeChatMessage);
+				writer.Write(forward ? subworldID : (current != null && subworlds.Contains(current) ? (ushort)subworlds.IndexOf(current) : ushort.MaxValue));
+				writer.Write(messageAuthor);
+				writer.Write(Netplay.Clients[messageAuthor].Name);
+				text.Serialize(writer);
+				writer.WriteRGB(color);
+				writer.Write(excludedPlayer == -1 ? ushort.MaxValue : (ushort)excludedPlayer);
+
+				// Convert packet
+				byte[] packet = new byte[stream.Length];
+				Buffer.BlockCopy(stream.GetBuffer(), 0, packet, 0, (int)stream.Length);
+				packet[1] = (byte)(stream.Length - 1);
+				packet[2] = (byte)((stream.Length - 1) >> 8);
+
+				// Send packet
+				if (current == null)
+				{
+					foreach (int i in links.Keys)
+					{
+						if (i != subworldID)
+						{
+							links[i].Send(packet);
+						}
+					}
+				}
+				else
+				{
+					SubserverSocket.pipe.Write(packet);
+				}
+			}
 		}
 	}
 }

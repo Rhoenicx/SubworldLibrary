@@ -39,6 +39,12 @@ namespace SubworldLibrary
 
 			if (Main.dedServ)
 			{
+				On_ChatHelper.BroadcastChatMessageAs += (orig, messageAuthor, text, color, excludedPlayer) =>
+				{
+					SubworldSystem.SynchoronizeChatMessages(messageAuthor, text, color, excludedPlayer);
+					orig(messageAuthor, text, color, excludedPlayer);
+				};
+
 				IL_Main.DedServ_PostModLoad += il =>
 				{
 					ConstructorInfo gameTime = typeof(GameTime).GetConstructor(Type.EmptyTypes);
@@ -685,6 +691,12 @@ namespace SubworldLibrary
 
 		private static void PrepareMessageBuffer(MessageBuffer buffer)
 		{
+			int whoAmI = buffer.whoAmI;
+
+			byte[] logbytes = new byte[buffer.totalData];
+			Buffer.BlockCopy(buffer.readBuffer, 0, logbytes, 0, buffer.totalData);
+			ModContent.GetInstance<SubworldLibrary>().Logger.Debug(whoAmI + " - Buffer: " + BitConverter.ToString(logbytes).Replace("-", ""));
+
 			int start = 0;
 			int totalData = buffer.totalData;
 			int writePosition = 0;
@@ -767,10 +779,10 @@ namespace SubworldLibrary
 					return false;
 				}
 
-				if (packetId == NetManager.Instance.GetId<NetTextModule>())
-				{
-					return false;
-				}
+				//if (packetId == NetManager.Instance.GetId<NetTextModule>())
+				//{
+				//	return false;
+				//}
 			}
 			return true;
 		}
@@ -919,6 +931,71 @@ namespace SubworldLibrary
 						ModNet.GetMod(ModNet.NetModCount < 256 ? reader.ReadByte() : reader.ReadInt16()).HandlePacket(reader, whoAmI);
 					}
 					break;
+
+				// SynchronizeChatMessage: Sent from any server to this server
+				case SubLibMessageType.SynchronizeChatMessage:
+					{
+						ushort subworldID = reader.ReadUInt16();
+						byte messageAuthor = reader.ReadByte();
+						string messageAuthorName = reader.ReadString();
+						NetworkText text = NetworkText.Deserialize(reader);
+						Color color = reader.ReadRGB();
+						ushort excludedPlayer = reader.ReadUInt16();
+
+						Logger.Debug("CHAT " + messageAuthorName);
+
+						if (Main.netMode == 2)
+						{
+							// Main server forwards packets to other server
+							if (SubworldSystem.current == null)
+							{
+								SubworldSystem.SynchoronizeChatMessages(
+									messageAuthor,
+									text,
+									color,
+									excludedPlayer == ushort.MaxValue ? -1 : excludedPlayer,
+									true,
+									subworldID);
+							}
+
+							ModPacket packet = GetPacket();
+							packet.Write((byte)SubLibMessageType.ChatMessage);
+							packet.Write(subworldID);
+							packet.Write(messageAuthor);
+							packet.Write(messageAuthorName);
+							text.Serialize(packet);
+							packet.WriteRGB(color);
+							packet.Write(excludedPlayer);
+							packet.Send(-1, whoAmI);
+							return;
+						}
+					}
+					break;
+
+				case SubLibMessageType.ChatMessage:
+					{
+						ushort subworldID = reader.ReadUInt16();
+						byte messageAuthor = reader.ReadByte();
+						string messageAuthorName = reader.ReadString();
+						NetworkText text = NetworkText.Deserialize(reader);
+						Color color = reader.ReadRGB();
+						ushort excludedPlayer = reader.ReadUInt16();
+
+						Logger.Debug("CHAT CLIENT " + messageAuthorName);
+
+						if (Main.netMode != 1)
+						{
+							break;
+						}
+
+						if (messageAuthor < byte.MaxValue && !Main.player[messageAuthor].active)
+						{
+							Main.player[messageAuthor].name = messageAuthorName;
+						}
+
+						ChatHelper.DisplayMessage(text, color, messageAuthor);
+					}
+					break;
 			}
 		}
 	}
@@ -931,5 +1008,7 @@ namespace SubworldLibrary
 		MovePlayerOnClient,
 		SendToMainServer,
 		SendToSubserver,
+		SynchronizeChatMessage,
+		ChatMessage,
 	}
 }
