@@ -17,7 +17,6 @@ using Terraria.GameContent.Creative;
 using Terraria.GameContent.Events;
 using Terraria.GameContent.UI.Chat;
 using Terraria.Graphics.Capture;
-using Terraria.ID;
 using Terraria.IO;
 using Terraria.Localization;
 using Terraria.ModLoader;
@@ -32,7 +31,7 @@ namespace SubworldLibrary
 {
 	internal class SubserverSocket : ISocket
 	{
-		private int id;
+		private readonly int id;
 
 		internal static NamedPipeClientStream pipe;
 		internal static RemoteAddress address;
@@ -49,7 +48,14 @@ namespace SubworldLibrary
 			byte[] packet = new byte[size + 1];
 			packet[0] = (byte)id;
 			Buffer.BlockCopy(data, offset, packet, 1, size);
-			pipe.Write(packet);
+			try
+			{
+				pipe.Write(packet);
+			}
+			catch 
+			{
+				throw;
+			}
 		}
 
 		void ISocket.Close() { }
@@ -71,13 +77,15 @@ namespace SubworldLibrary
 
 	internal class SubserverLink
 	{
+		private int _id;
 		private NamedPipeClientStream pipe;
 		private List<byte[]> queue;
 
-		public SubserverLink(string name)
+		public SubserverLink(string name, int id)
 		{
 			pipe = new NamedPipeClientStream(".", name + "_IN", PipeDirection.Out);
 			queue = new List<byte[]>(16);
+			_id = id;
 		}
 
 		public bool Connecting => queue != null;
@@ -93,40 +101,67 @@ namespace SubworldLibrary
 			return true;
 		}
 
+		public bool CanSend()
+		{
+			return SubworldSystem.playerLocations.ContainsValue(_id);
+		}
+
 		public void Send(byte[] data)
 		{
-			lock (this)
+			try
 			{
-				if (QueueData(data))
+				if (CanSend())
 				{
-					return;
+					lock (this)
+					{
+						if (QueueData(data))
+						{
+							return;
+						}
+					}
+					pipe.Write(data);
+				}
+				else
+				{
+					Close();
+					SubworldSystem.links.Remove(_id);
 				}
 			}
-			pipe.Write(data);
+			catch
+			{
+				throw;
+			}
 		}
 
 		public void ConnectAndProcessQueue()
 		{
-			pipe.Connect();
-			pipe.Write(queue[0]);
-			lock (this)
+			try
 			{
-				int size = 0;
-				for (int i = 1; i < queue.Count; i++)
+				pipe.Connect();
+				pipe.Write(queue[0]);
+				lock (this)
 				{
-					size += queue[i].Length;
-				}
+					int size = 0;
+					for (int i = 1; i < queue.Count; i++)
+					{
+						size += queue[i].Length;
+					}
 
-				byte[] bytes = new byte[size];
-				size = 0;
-				for (int i = 1; i < queue.Count; i++)
-				{
-					Buffer.BlockCopy(queue[i], 0, bytes, size, queue[i].Length);
-					size += queue[i].Length;
-				}
-				pipe.Write(bytes);
+					byte[] bytes = new byte[size];
+					size = 0;
+					for (int i = 1; i < queue.Count; i++)
+					{
+						Buffer.BlockCopy(queue[i], 0, bytes, size, queue[i].Length);
+						size += queue[i].Length;
+					}
+					pipe.Write(bytes);
 
-				queue = null;
+					queue = null;
+				}
+			}
+			catch
+			{
+				throw;
 			}
 		}
 
@@ -497,6 +532,12 @@ namespace SubworldLibrary
 			{
 				link.Send(data);
 			}
+
+			// Remove the socket of the disconnected client from the playerLocations
+			if (playerLocations.ContainsKey(Netplay.Clients[player].Socket))
+			{
+				playerLocations.Remove(Netplay.Clients[player].Socket);
+			}
 		}
 
 		/// <summary>
@@ -523,7 +564,7 @@ namespace SubworldLibrary
 				IsBackground = true
 			}.Start(id);
 
-			links[id] = new SubserverLink(name);
+			links[id] = new SubserverLink(name, id);
 
 			copiedData = new TagCompound();
 			CopyMainWorldData();
@@ -669,7 +710,14 @@ namespace SubworldLibrary
 				int header = ModNet.NetModCount < 256 ? 7 : 9;
 				byte[] packet = GetPacketHeader(data.Length + header, mod.NetID, SubLibMessageType.SendToMainServer);
 				Buffer.BlockCopy(data, 0, packet, header, data.Length);
-				SubserverSocket.pipe.Write(packet);
+				try
+				{
+					SubserverSocket.pipe.Write(packet);
+				}
+				catch
+				{
+					throw;
+				}
 			}
 		}
 
@@ -984,7 +1032,7 @@ namespace SubworldLibrary
 			{
 				pipe.WaitForConnection();
 
-				while (pipe.IsConnected)
+				while (pipe.IsConnected && !Netplay.Disconnect)
 				{
 					byte[] packetInfo = new byte[3];
 					if (pipe.Read(packetInfo) < 3)
@@ -1044,6 +1092,10 @@ namespace SubworldLibrary
 						Netplay.Clients[packetInfo[0]].Socket.AsyncSend(data, 0, length, (state) => { });
 					}
 				}
+			}
+			catch 
+			{
+				throw;
 			}
 			finally
 			{
@@ -1182,6 +1234,10 @@ namespace SubworldLibrary
 						}
 					}
 				}
+			}
+			catch 
+			{
+				throw;
 			}
 			finally
 			{
@@ -1733,7 +1789,14 @@ namespace SubworldLibrary
 			}
 			else if (SubserverSocket.pipe.IsConnected)
 			{
-				SubserverSocket.pipe.Write(packet);
+				try
+				{
+					SubserverSocket.pipe.Write(packet);
+				}
+				catch
+				{
+					throw;
+				}
 			}
 		}
 

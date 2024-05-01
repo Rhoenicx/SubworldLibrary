@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -197,16 +198,6 @@ namespace SubworldLibrary
 
 				if (!Program.LaunchParameters.ContainsKey("-subworld"))
 				{
-					On_NetMessage.EnsureLocalPlayerIsPresent += (orig) =>
-					{
-						if (SubworldSystem.links != null && SubworldSystem.links.Any())
-						{
-							return;
-						}
-
-						orig();
-					};
-
 					IL_NetMessage.CheckBytes += il =>
 					{
 						ILCursor c, cc;
