@@ -7,7 +7,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Net.Sockets;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,6 +14,7 @@ using Terraria;
 using Terraria.Chat;
 using Terraria.GameContent.NetModules;
 using Terraria.Graphics.Light;
+using Terraria.ID;
 using Terraria.IO;
 using Terraria.Localization;
 using Terraria.ModLoader;
@@ -71,7 +71,7 @@ namespace SubworldLibrary
 					ILLabel skip = null;
 					if (!c.TryGotoNext(i => i.MatchBr(out skip)))
 					{
-						Logger.Error("FAILED:");
+						Logger.Error("Failed to apply IL patch into: Main.DedServ_PostModLoad");
 						return;
 					}
 
@@ -165,7 +165,7 @@ namespace SubworldLibrary
 						x => x.MatchLdsfld(typeof(ModNet), "DetailedLogging"),
 						x => x.MatchBrfalse(out _)))
 					{
-						Logger.Error("FAILED:");
+						Logger.Error("Failed to apply IL patch into: NetMessage.CheckBytes - PrepareMessageBuffer");
 						return;
 					}
 
@@ -179,12 +179,12 @@ namespace SubworldLibrary
 
 				void HandleModPacket(ILContext il)
 				{
-					ILCursor c = new ILCursor(il);
+					ILCursor c = new(il);
 					ILLabel label = c.DefineLabel();
 
 					if (!c.TryGotoNext(MoveType.Before, i => i.MatchLdsfld(typeof(ModNet), "ReadUnderflowBypass"), i => i.MatchBrtrue(out label)))
 					{
-						Logger.Error("FAILED:");
+						Logger.Error("Failed to apply IL patch into: ModNet.HandleModPacket");
 						return;
 					}
 
@@ -198,6 +198,33 @@ namespace SubworldLibrary
 
 				if (!Program.LaunchParameters.ContainsKey("-subworld"))
 				{
+					IL_NetMessage.DoesPlayerSlotCountAsAHost += il =>
+					{
+						ILCursor c = new(il);
+
+						if (!c.TryGotoNext(
+							i => i.MatchLdsfld<Netplay>("Clients"),
+							i => i.MatchLdarg0(),
+							i => i.MatchLdelemRef(),
+							i => i.MatchLdfld<RemoteClient>("State"),
+							i => i.MatchLdcI4(10),
+							i => i.MatchBneUn(out ILLabel _)))
+						{
+							Logger.Error("Failed to apply IL patch into: NetMessage.DoesPlayerSlotCountAsAHost");
+							return;
+						}
+
+						ILLabel label = il.DefineLabel();
+
+						c.Index += 6;
+						c.MarkLabel(label);
+						c.Index -= 6;
+
+						c.Emit(Ldarg_0);
+						c.Emit(OpCodes.Call, typeof(SubworldLibrary).GetMethod("CheckLocalHost", BindingFlags.NonPublic | BindingFlags.Static));
+						c.Emit(Brtrue, label);
+					};
+
 					IL_NetMessage.CheckBytes += il =>
 					{
 						ILCursor c, cc;
@@ -206,7 +233,7 @@ namespace SubworldLibrary
 						|| !c.TryGotoNext(MoveType.After, i => i.MatchCallvirt(typeof(Stream), "get_Position"), i => i.MatchStloc(out _))
 						|| !(cc = c.Clone()).TryGotoNext(i => i.MatchLdsfld(typeof(NetMessage), "buffer"), i => i.MatchLdarg(0), i => i.MatchLdelemRef(), i => i.MatchLdfld(typeof(MessageBuffer), "reader")))
 						{
-							Logger.Error("FAILED:");
+							Logger.Error("Failed to apply IL patch into: NetMessage.CheckBytes - DenyRead");
 							return;
 						}
 
@@ -231,7 +258,7 @@ namespace SubworldLibrary
 						var c = new ILCursor(il);
 						if (!c.TryGotoNext(MoveType.After, i => i.MatchRet()))
 						{
-							Logger.Error("FAILED:");
+							Logger.Error("Failed to apply IL patch into: SocialSocket/TcpSocket.AsyncSend");
 							return;
 						}
 						c.MoveAfterLabels();
@@ -254,12 +281,39 @@ namespace SubworldLibrary
 						if (!c.TryGotoNext(MoveType.After, i => i.MatchCallvirt(typeof(RemoteClient), "Reset"))
 						|| !c.Instrs[c.Index].MatchLdloc(out int index))
 						{
-							Logger.Error("FAILED:");
+							Logger.Error("Failed to apply IL patch into: Netplay.UpdateConnectedClients");
 							return;
 						}
 
 						c.Emit(Ldloc, index);
 						c.Emit(OpCodes.Call, typeof(SubworldSystem).GetMethod("SyncDisconnect", BindingFlags.NonPublic | BindingFlags.Static));
+					};
+				}
+				else
+				{
+					IL_NetMessage.CheckBytes += il =>
+					{
+						ILCursor c, cc;
+						if (!(c = new ILCursor(il)).TryGotoNext(MoveType.After, i => i.MatchCall(typeof(BitConverter), "ToUInt16"))
+						|| !c.Instrs[c.Index].MatchStloc(out int index)
+						|| !c.TryGotoNext(MoveType.After, i => i.MatchCallvirt(typeof(Stream), "get_Position"), i => i.MatchStloc(out _))
+						|| !(cc = c.Clone()).TryGotoNext(i => i.MatchLdsfld(typeof(NetMessage), "buffer"), i => i.MatchLdarg(0), i => i.MatchLdelemRef(), i => i.MatchLdfld(typeof(MessageBuffer), "reader")))
+						{
+							Logger.Error("Failed to apply IL patch into: NetMessage.CheckBytes - DenyReadSubServer");
+							return;
+						}
+
+						c.Emit(Ldsfld, typeof(NetMessage).GetField("buffer"));
+						c.Emit(Ldarg_0);
+						c.Emit(Ldelem_Ref);
+						c.Emit(Ldloc_2);
+						c.Emit(Ldloc, index);
+						c.Emit(OpCodes.Call, typeof(SubworldLibrary).GetMethod("DenyReadSubServer", BindingFlags.NonPublic | BindingFlags.Static));
+
+						var label = c.DefineLabel();
+						c.Emit(Brtrue, label);
+
+						cc.MarkLabel(label);
 					};
 				}
 			}
@@ -270,7 +324,7 @@ namespace SubworldLibrary
 					var c = new ILCursor(il);
 					if (!c.TryGotoNext(MoveType.After, i => i.MatchStsfld(typeof(Main), "HoverItem")))
 					{
-						Logger.Error("FAILED:");
+						Logger.Error("Failed to apply IL patch into: Main.DoDraw");
 						return;
 					}
 
@@ -318,7 +372,7 @@ namespace SubworldLibrary
 					if (!(c = new ILCursor(il)).TryGotoNext(i => i.MatchLdcI4(330))
 					|| !(cc = c.Clone()).TryGotoNext(i => i.MatchStloc(out _), i => i.MatchLdcR4(255)))
 					{
-						Logger.Error("FAILED:");
+						Logger.Error("Failed to apply IL patch into: Main.DrawBackGround");
 						return;
 					}
 
@@ -341,7 +395,7 @@ namespace SubworldLibrary
 					if (!(c = new ILCursor(il)).TryGotoNext(i => i.MatchLdcI4(230))
 					|| !(cc = c.Clone()).TryGotoNext(i => i.MatchStloc(18), i => i.MatchLdcI4(0)))
 					{
-						Logger.Error("FAILED:");
+						Logger.Error("Failed to apply IL patch into: Main.OldDrawBackground");
 						return;
 					}
 
@@ -365,7 +419,7 @@ namespace SubworldLibrary
 					|| !(cc = c.Clone()).TryGotoNext(MoveType.After, i => i.MatchCall(typeof(Main), "UpdateAudio_DecideOnNewMusic"))
 					|| !cc.Instrs[cc.Index].MatchBr(out ILLabel label))
 					{
-						Logger.Error("FAILED:");
+						Logger.Error("Failed to apply IL patch into: Main.UpdateAudio");
 						return;
 					}
 
@@ -391,7 +445,7 @@ namespace SubworldLibrary
 					|| !(ccc = cc.Clone()).TryGotoNext(i => i.MatchLdnull(), i => i.MatchCall(typeof(WorldGen), "SaveAndQuit"))
 					|| !(cccc = ccc.Clone()).TryGotoPrev(MoveType.AfterLabel, i => i.MatchLdloc(out _), i => i.MatchLdcI4(1), i => i.MatchAdd(), i => i.MatchStloc(out _)))
 					{
-						Logger.Error("FAILED:");
+						Logger.Error("Failed to apply IL patch into: IngameOptions.Draw");
 						return;
 					}
 
@@ -432,7 +486,7 @@ namespace SubworldLibrary
 					|| !(cc = c.Clone()).TryGotoNext(MoveType.AfterLabel, i => i.MatchLdarg(2), i => i.MatchCall(typeof(Main), "get_UnderworldLayer"))
 					|| !(ccc = cc.Clone()).TryGotoNext(MoveType.After, i => i.MatchCall(typeof(TileLightScanner), "ApplyHellLight")))
 					{
-						Logger.Error("FAILED:");
+						Logger.Error("Failed to apply IL patch into: TileLightScanner.GetTileLight");
 						return;
 					}
 
@@ -466,7 +520,7 @@ namespace SubworldLibrary
 					if (!(c = new ILCursor(il)).TryGotoNext(MoveType.AfterLabel, i => i.MatchLdloc(out _), i => i.MatchLdfld(typeof(Point), "Y"), i => i.MatchLdsfld(typeof(Main), "maxTilesY"))
 					|| !(cc = c.Clone()).TryGotoNext(i => i.MatchStloc(out _)))
 					{
-						Logger.Error("FAILED:");
+						Logger.Error("Failed to apply IL patch into: Player.UpdateBiomes");
 						return;
 					}
 
@@ -520,7 +574,7 @@ namespace SubworldLibrary
 				if (!(c = new ILCursor(il)).TryGotoNext(MoveType.After, i => i.MatchCall(typeof(SystemLoader), "PreUpdateTime"))
 				|| !(cc = c.Clone()).TryGotoNext(i => i.MatchCall(typeof(SystemLoader), "PostUpdateTime")))
 				{
-					Logger.Error("FAILED:");
+					Logger.Error("Failed to apply IL patch into: Main.DoUpdateInWorld");
 					return;
 				}
 
@@ -543,7 +597,7 @@ namespace SubworldLibrary
 				var c = new ILCursor(il);
 				if (!c.TryGotoNext(i => i.MatchCall(typeof(WorldGen), "UpdateWorld_Inner")))
 				{
-					Logger.Error("FAILED:");
+					Logger.Error("Failed to apply IL patch into: WorldGen.UpdateWorld");
 					return;
 				}
 
@@ -572,7 +626,7 @@ namespace SubworldLibrary
 				|| !(cc = c.Clone()).TryGotoNext(MoveType.After, i => i.MatchLdarg(0), i => i.MatchLdarg(0), i => i.MatchLdfld(typeof(Player), "gravity"))
 				|| !cc.Instrs[cc.Index].MatchLdloc(out int index))
 				{
-					Logger.Error("FAILED:");
+					Logger.Error("Failed to apply IL patch into: Player.Update");
 					return;
 				}
 
@@ -604,7 +658,7 @@ namespace SubworldLibrary
 				|| !(cc = c.Clone()).TryGotoNext(MoveType.After, i => i.MatchLdarg(0), i => i.MatchLdarg(0), i => i.MatchCall(typeof(NPC), "get_gravity"))
 				|| !cc.Instrs[cc.Index].MatchLdloc(out int index))
 				{
-					Logger.Error("FAILED:");
+					Logger.Error("Failed to apply IL patch into: NPC.UpdateNPC_UpdateGravity");
 					return;
 				}
 
@@ -634,7 +688,7 @@ namespace SubworldLibrary
 				var c = new ILCursor(il);
 				if (!c.TryGotoNext(i => i.MatchLdarg(0), i => i.MatchLdfld(typeof(Liquid), "y"), i => i.MatchCall(typeof(Main), "get_UnderworldLayer")))
 				{
-					Logger.Error("FAILED:");
+					Logger.Error("Failed to apply IL patch into: Liquid.Update");
 					return;
 				}
 
@@ -656,7 +710,7 @@ namespace SubworldLibrary
 				|| !(cc = c.Clone()).TryGotoNext(MoveType.AfterLabel, i => i.MatchLdsfld(typeof(Main), "ServerSideCharacter"))
 				|| !(ccc = cc.Clone()).TryGotoNext(MoveType.After, i => i.MatchCall(typeof(FileUtilities), "ProtectedInvoke")))
 				{
-					Logger.Error("FAILED:");
+					Logger.Error("Failed to apply IL patch into: Player.SavePlayer");
 					return;
 				}
 
@@ -748,39 +802,70 @@ namespace SubworldLibrary
 
 		private static bool DenyRead(MessageBuffer buffer, int start, int length)
 		{
-			if (buffer.readBuffer[start + 2] == 250 && (ModNet.NetModCount < 256 ? buffer.readBuffer[start + 3] : BitConverter.ToUInt16(buffer.readBuffer, start + 3)) == ModContent.GetInstance<SubworldLibrary>().NetID)
-			{
-				return false;
-			}
-			if (!SubworldSystem.playerLocations.TryGetValue(Netplay.Clients[buffer.whoAmI].Socket, out int id))
-			{
-				// Intentional packet leak: block everything besides Hello when not
-				// successfully logged in (yet). Prevents server from booting the client.
-				return Netplay.Clients[buffer.whoAmI].State == 0 && buffer.readBuffer[start + 2] != 1;
-			}
-
-			SubserverLink link = SubworldSystem.links[id];
-			if (link.Connecting && buffer.readBuffer[start + 2] != 1)
-			{
-				return false;
-			}
-
 			RemoteClient client = Netplay.Clients[buffer.whoAmI];
+			byte MessageType = buffer.readBuffer[start + 2];
+
+			// Only accept 'Hello' packets if the client is not connected
+			if (client.State == 0 && MessageType != MessageID.Hello)
+			{
+				return true;
+			}
+
+			// Determine the connection state of this client
+			SubworldSystem.playerLocations.TryAdd(client.Socket, -1);
+
+			// Received packet contains the netID of Subworld Library. Let this packet through on the main server.
+			if (MessageType == MessageID.ModPacket 
+				&& (ModNet.NetModCount < 256 ? buffer.readBuffer[start + 3] : BitConverter.ToUInt16(buffer.readBuffer, start + 3)) == ModContent.GetInstance<SubworldLibrary>().NetID)
+			{
+				return false;
+			}
+
+			// If the client's location is the main server, let this packet through by default.
+			if (SubworldSystem.playerLocations.TryGetValue(Netplay.Clients[buffer.whoAmI].Socket, out int id) && id <= -1)
+			{
+				return false;
+			}
+
+			// Verify if the client's location subworld is still active
+			if (!SubworldSystem.links.TryGetValue(id, out SubserverLink link))
+			{
+				// Somehow this client is/was connected to a closed subserver...
+				if (!Netplay.Disconnect)
+				{
+					// Try to force the client back to the main server
+					SubworldSystem.MovePlayerToSubserver(buffer.whoAmI, ushort.MaxValue);
+				}
+				else
+				{
+					// Kick the client
+					NetMessage.BootPlayer(buffer.whoAmI, Lang.mp[2].ToNetworkText());
+				}
+
+				// Block the packet.
+				return true;
+			}
+
+			// The subserver link is still starting up and/or processing its queue,
+			// while this client is trying to connect to the subserver.
+			// Only accept Hello messages into the queue; block everything else.
+			if (link.Connecting && MessageType != MessageID.Hello)
+			{
+				return true;
+			}
+
+			// Reset the client's timeout on the main server when this client is connected to a sub server.
+			// This keeps the main server from disconnecting this client.
 			client.TimeOutTimer = 0;
 
+			// Copy the data from the readBuffer and send it to the sub server
+			// where the corresponding client is connected.
 			byte[] packet = new byte[length + 1];
 			packet[0] = (byte)buffer.whoAmI;
 			Buffer.BlockCopy(buffer.readBuffer, start, packet, 1, length);
 			link.Send(packet);
 
-			// Intentional packet leak: block everything besides Hello when not
-			// successfully logged in (yet). Prevents server from booting the client.
-			if (client.State < 1 && buffer.readBuffer[start + 2] != 1)
-			{
-				return true;
-			}
-
-			if (packet[3] == 82)
+			if (packet[3] == MessageID.NetModules)
 			{
 				ushort packetId = BitConverter.ToUInt16(packet, 4);
 
@@ -788,18 +873,31 @@ namespace SubworldLibrary
 				{
 					return false;
 				}
-
-				//if (packetId == NetManager.Instance.GetId<NetTextModule>())
-				//{
-				//	return false;
-				//}
 			}
 			return true;
 		}
 
+		private static bool DenyReadSubServer(MessageBuffer buffer, int start, int length)
+		{
+			// Intentional packet leak: block everything besides Hello when not
+			// successfully logged in (yet). Prevents server from booting the client.
+			RemoteClient client = Netplay.Clients[buffer.whoAmI];
+			if (client.State == 0 && buffer.readBuffer[start + 2] != MessageID.Hello)
+			{
+				return true;
+			}
+
+			return false;
+		}
+
 		private static bool DenySend(ISocket socket, byte[] data, int start, int length, ref object state)
 		{
-			return Thread.CurrentThread.Name != "Subserver Packets" && SubworldSystem.playerLocations.ContainsKey(socket);
+			return Thread.CurrentThread.Name != "Subserver Packets" && SubworldSystem.playerLocations.TryGetValue(socket, out int id) && id > -1;
+		}
+
+		private static bool CheckLocalHost(int player)
+		{
+			return Netplay.Clients[player].Socket != null && SubworldSystem.playerLocations.ContainsKey(Netplay.Clients[player].Socket);
 		}
 
 		private static void Sleep(Stopwatch stopwatch, double delta, ref double target)
@@ -895,7 +993,7 @@ namespace SubworldLibrary
 					{
 						ushort id = reader.ReadUInt16();
 
-						if (Main.netMode == 2 && !SubworldSystem.noReturn)
+						if (Main.netMode == NetmodeID.Server && !SubworldSystem.noReturn)
 						{
 							SubworldSystem.MovePlayerToSubserver(whoAmI, id);
 						}
@@ -906,7 +1004,7 @@ namespace SubworldLibrary
 				// Sent from main server => sub server
 				case SubLibMessageType.MovePlayerOnServer:
 					{
-						if (Main.netMode == 2 && SubworldSystem.current != null)
+						if (Main.netMode == NetmodeID.Server && SubworldSystem.current != null)
 						{
 							Netplay.Clients[whoAmI].Reset();
 
@@ -925,7 +1023,7 @@ namespace SubworldLibrary
 					{
 						ushort id = reader.ReadUInt16();
 
-						if (Main.netMode == 1)
+						if (Main.netMode == NetmodeID.MultiplayerClient)
 						{ 
 							Task.Factory.StartNew(SubworldSystem.ExitWorldCallBack, id < ushort.MaxValue ? id : -1);
 						}
@@ -956,7 +1054,7 @@ namespace SubworldLibrary
 						NetworkText text = NetworkText.Deserialize(reader);
 						Color color = reader.ReadRGB();
 
-						if (Main.netMode == 2)
+						if (Main.netMode == NetmodeID.Server)
 						{
 							// Main server forwards packets to other server
 							if (SubworldSystem.current == null)
@@ -1002,7 +1100,7 @@ namespace SubworldLibrary
 						NetworkText text = NetworkText.Deserialize(reader);
 						Color color = reader.ReadRGB();
 
-						if (Main.netMode != 1)
+						if (Main.netMode != NetmodeID.MultiplayerClient)
 						{
 							break;
 						}
@@ -1023,7 +1121,7 @@ namespace SubworldLibrary
 		}
 	}
 
-	public enum SubLibMessageType : byte
+	internal enum SubLibMessageType : byte
 	{
 		None = 0, // Fail-safe: we should not use 0
 		BeginEntering,
