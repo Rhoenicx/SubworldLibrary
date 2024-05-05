@@ -838,7 +838,7 @@ namespace SubworldLibrary
 				}
 				else
 				{
-					// Kick the client
+					// Kick the client	
 					NetMessage.BootPlayer(buffer.whoAmI, Lang.mp[2].ToNetworkText());
 				}
 
@@ -1130,6 +1130,6 @@ namespace SubworldLibrary
 		SendToMainServer,
 		SendToSubserver,
 		BroadcastBetweenServers,
-		Broadcast,
+		Broadcast
 	}
 }

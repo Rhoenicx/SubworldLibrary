@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipelines;
 using System.IO.Pipes;
 using System.Linq;
 using System.Net;
@@ -46,7 +47,7 @@ namespace SubworldLibrary
 		{
 			try
 			{
-				if (!Netplay.Disconnect)
+				if (!Netplay.Disconnect && pipe.IsConnected)
 				{
 					pipe.Write(data);
 				}
@@ -170,8 +171,13 @@ namespace SubworldLibrary
 
 		public void Close()
 		{
-			pipe?.Close();
+			ClosePipe();
 			SubworldSystem.CloseSubserver(worldID);
+		}
+
+		public void ClosePipe()
+		{
+			pipe?.Close();
 		}
 	}
 
@@ -570,17 +576,24 @@ namespace SubworldLibrary
 				return;
 			}
 
-			// Remove the subworld from the links
-			links.Remove(worldID);
-
-			// Move all players that are still 'connected' to the closed sub server back to the main server
-			for (int i = 0; i < Netplay.Clients.Length; i++)
+			// Close the pipe of the link
+			if (links.ContainsKey(worldID))
 			{
-				if (Netplay.Clients[i].State != 0
-					&& Netplay.Clients[i].Socket != null
-					&& playerLocations.TryGetValue(Netplay.Clients[i].Socket, out int id) && id == worldID)
+				links[worldID].ClosePipe();
+			}
+
+			// Remove the subworld from the links
+			if (links.Remove(worldID))
+			{
+				// Move all players that are still 'connected' to the closed sub server back to the main server
+				for (int i = 0; i < Netplay.Clients.Length; i++)
 				{
-					MovePlayerToSubserver(i, ushort.MaxValue);
+					if (Netplay.Clients[i].State != 0
+						&& Netplay.Clients[i].Socket != null
+						&& playerLocations.TryGetValue(Netplay.Clients[i].Socket, out int id) && id == worldID)
+					{
+						MovePlayerToSubserver(i, ushort.MaxValue);
+					}
 				}
 			}
 		}
@@ -597,12 +610,6 @@ namespace SubworldLibrary
 
 			string name = subworlds[id].FileName;
 
-			Process p = new Process();
-			p.StartInfo.FileName = Process.GetCurrentProcess().MainModule!.FileName;
-			p.StartInfo.Arguments = "tModLoader.dll -server -showserverconsole -world \"" + Main.worldPathName + "\" -subworld \"" + name + "\"";
-			p.StartInfo.UseShellExecute = true;
-			p.Start();
-
 			new Thread(MainServerCallBack)
 			{
 				Name = "Subserver Packets",
@@ -617,12 +624,32 @@ namespace SubworldLibrary
 			using (MemoryStream stream = new())
 			{
 				TagIO.ToStream(copiedData, stream);
-				links[id].QueueData(stream.ToArray());
+				
+				// Copy data from stream to byte array.
+				byte[] data = new byte[stream.Length + 4];
+
+				// Place the length in front of the Tag
+				data[0] = (byte)(stream.Length >> 0);
+				data[1] = (byte)(stream.Length >> 8);
+				data[2] = (byte)(stream.Length >> 16);
+				data[3] = (byte)(stream.Length >> 24);
+
+				// Copy data
+				Buffer.BlockCopy(stream.GetBuffer(), 0, data, 4, (int)stream.Length);
+
+				// CopiedData will always we the first packet that is send to a subworld.
+				links[id].QueueData(data);
 			}
 
 			copiedData = null;
 
 			Task.Run(links[id].ConnectAndProcessQueue);
+
+			Process p = new Process();
+			p.StartInfo.FileName = Process.GetCurrentProcess().MainModule!.FileName;
+			p.StartInfo.Arguments = "tModLoader.dll -server -showserverconsole -world \"" + Main.worldPathName + "\" -subworld \"" + name + "\"";
+			p.StartInfo.UseShellExecute = true;
+			p.Start();
 		}
 
 		/// <summary>
@@ -755,14 +782,7 @@ namespace SubworldLibrary
 				int header = ModNet.NetModCount < 256 ? 7 : 9;
 				byte[] packet = GetPacketHeader(data.Length + header, mod.NetID, SubLibMessageType.SendToMainServer);
 				Buffer.BlockCopy(data, 0, packet, header, data.Length);
-				try
-				{
-					SubserverSocket.pipe.Write(packet);
-				}
-				catch
-				{
-					throw;
-				}
+				SubserverSocket.Send(packet);
 			}
 		}
 
@@ -1077,7 +1097,7 @@ namespace SubworldLibrary
 			{
 				pipe.WaitForConnection();
 
-				while (pipe.IsConnected && !Netplay.Disconnect && playerLocations.Any(pl => pl.Value == (int)worldID))
+				while (!Netplay.Disconnect && playerLocations.Any(pl => pl.Value == (int)worldID) && links.ContainsKey((int)worldID))
 				{
 					byte[] packetInfo = new byte[3];
 					if (pipe.Read(packetInfo) < 3)
@@ -1164,28 +1184,37 @@ namespace SubworldLibrary
 					main = Main.ActiveWorldFileData;
 					current = subworlds[i];
 
-					NamedPipeClientStream pipe = new NamedPipeClientStream(".", current.FileName + "_IN", PipeDirection.In);
-					pipe.Connect();
-
-					copiedData = TagIO.FromStream(pipe);
-					LoadWorld();
-					copiedData = null;
-
 					// replicates Netplay.InitializeServer, no need to set ReadBuffer because it's not used
 					for (int j = 0; j < 256; j++)
 					{
 						Netplay.Clients[j].Id = j;
 						Netplay.Clients[j].Reset();
 					}
+
+					// Create the pipe used in SubserverCallBackand connect it.
+					// The main server pipe should already be waiting for connection (server boot takes some time...)
+					NamedPipeClientStream pipe = new NamedPipeClientStream(".", current.FileName + "_IN", PipeDirection.In);
+					pipe.Connect();
+
+					// Setup SubserverSocket with a TCP address
 					SubserverSocket.address = new TcpAddress(IPAddress.Any, 0);
 
+					// Create the pipe used for the SubserverSocket and connect it.
+					// The main server pipe should already be waiting for connection.
+					SubserverSocket.pipe = new NamedPipeClientStream(".", current.FileName + "_OUT", PipeDirection.Out);
+					SubserverSocket.pipe.Connect();
+
+					// Read the copied main world data from the IN pipe.
+					// World data is ALWAYS the first packet that is sent over the pipe!
+					SubserverReadCopiedMainWorldData(pipe);
+					LoadWorld();
+					copiedData = null;
+
+					// Start up the SubserverCallBack thread
 					new Thread(SubserverCallBack)
 					{
 						IsBackground = true
 					}.Start(pipe);
-
-					SubserverSocket.pipe = new NamedPipeClientStream(".", current.FileName + "_OUT", PipeDirection.Out);
-					SubserverSocket.pipe.Connect();
 
 					return true;
 				}
@@ -1201,12 +1230,34 @@ namespace SubworldLibrary
 			return false;
 		}
 
+		private static void SubserverReadCopiedMainWorldData(NamedPipeClientStream pipe)
+		{
+			try
+			{
+				byte[] header = new byte[4];
+				if (pipe.Read(header, 0, 4) >= 4)
+				{
+					int length = BitConverter.ToInt32(header);
+					byte[] data = new byte[length];
+
+					pipe.Read(data, 0, length);
+
+					MemoryStream stream = new(data);
+					copiedData = TagIO.FromStream(stream);
+				}
+			}
+			catch (Exception e)
+			{
+				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occured while reading main world data: " + e.Message);
+			}
+		}
+
 		private static void SubserverCallBack(object pipeObject)
 		{
 			NamedPipeClientStream pipe = (NamedPipeClientStream)pipeObject;
 			try
 			{
-				while (!Netplay.Disconnect && pipe.IsConnected)
+				while (pipe.IsConnected && !Netplay.Disconnect)
 				{
 					byte[] packetInfo = new byte[3];
 					if (pipe.Read(packetInfo) < 3)
@@ -1284,8 +1335,8 @@ namespace SubworldLibrary
 			finally
 			{
 				Netplay.Disconnect = true;
-				pipe.Close();
-				SubserverSocket.pipe.Close();
+				pipe?.Close();
+				SubserverSocket.pipe?.Close();
 			}
 		}
 
@@ -1590,7 +1641,10 @@ namespace SubworldLibrary
 			Main.weatherCounter = 18000;
 			Cloud.resetClouds();
 
-			ReadCopiedMainWorldData();
+			if (copiedData != null)
+			{
+				ReadCopiedMainWorldData();
+			}
 
 			double weight = 0;
 			for (int i = 0; i < current.Tasks.Count; i++)
