@@ -21,7 +21,6 @@ using Terraria.ModLoader;
 using Terraria.Net;
 using Terraria.Net.Sockets;
 using Terraria.Utilities;
-using XPT.Core.Audio.MP3Sharp.Decoding;
 using static Mono.Cecil.Cil.OpCodes;
 
 namespace SubworldLibrary
