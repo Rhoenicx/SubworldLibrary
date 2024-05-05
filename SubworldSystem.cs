@@ -392,7 +392,7 @@ namespace SubworldLibrary
 				return;
 			}
 
-			if (Main.netMode == 0)
+			if (Main.netMode == NetmodeID.SinglePlayer)
 			{
 				if (current == null && index >= 0)
 				{
@@ -647,9 +647,32 @@ namespace SubworldLibrary
 
 			Process p = new Process();
 			p.StartInfo.FileName = Process.GetCurrentProcess().MainModule!.FileName;
-			p.StartInfo.Arguments = "tModLoader.dll -server -showserverconsole -world \"" + Main.worldPathName + "\" -subworld \"" + name + "\"";
+			p.StartInfo.Arguments = "tModLoader.dll -server -showserverconsole -world \"" + Main.worldPathName + "\" -subworld \"" + name + "\"" + CopyMainServerArguments();
 			p.StartInfo.UseShellExecute = true;
 			p.Start();
+		}
+
+		private static string CopyMainServerArguments()
+		{
+			string arguments = "";
+			if (Program.LaunchParameters.ContainsKey("-modpath"))
+			{
+				arguments += " -modpath \"" + Program.LaunchParameters["-modpath"] + "\"";
+			}
+
+			if (Program.LaunchParameters.ContainsKey("-modpack"))
+			{
+				arguments += " -modpack \"" + Program.LaunchParameters["-modpack"] + "\"";
+			}
+
+			arguments += " -players " + Main.maxNetPlayers;
+
+			if (Program.LaunchParameters.ContainsKey("-lang"))
+			{
+				arguments += " -lang " + Program.LaunchParameters["-lang"];
+			}
+
+			return arguments;
 		}
 
 		/// <summary>
