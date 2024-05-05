@@ -672,6 +672,11 @@ namespace SubworldLibrary
 				arguments += " -lang " + Program.LaunchParameters["-lang"];
 			}
 
+			if (Program.LaunchParameters.ContainsKey("-detailednetlog") || ModNet.DetailedLogging)
+			{
+				arguments += " -detailednetlog";
+			}
+
 			return arguments;
 		}
 
