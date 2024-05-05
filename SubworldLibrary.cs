@@ -21,6 +21,7 @@ using Terraria.ModLoader;
 using Terraria.Net;
 using Terraria.Net.Sockets;
 using Terraria.Utilities;
+using XPT.Core.Audio.MP3Sharp.Decoding;
 using static Mono.Cecil.Cil.OpCodes;
 
 namespace SubworldLibrary
@@ -803,10 +804,10 @@ namespace SubworldLibrary
 		private static bool DenyRead(MessageBuffer buffer, int start, int length)
 		{
 			RemoteClient client = Netplay.Clients[buffer.whoAmI];
-			byte MessageType = buffer.readBuffer[start + 2];
+			byte messageType = buffer.readBuffer[start + 2];
 
 			// Only accept 'Hello' packets if the client is not connected
-			if (client.State == 0 && MessageType != MessageID.Hello)
+			if (client.State == 0 && messageType != MessageID.Hello)
 			{
 				return true;
 			}
@@ -815,7 +816,7 @@ namespace SubworldLibrary
 			SubworldSystem.playerLocations.TryAdd(client.Socket, -1);
 
 			// Received packet contains the netID of Subworld Library. Let this packet through on the main server.
-			if (MessageType == MessageID.ModPacket 
+			if (messageType == MessageID.ModPacket 
 				&& (ModNet.NetModCount < 256 ? buffer.readBuffer[start + 3] : BitConverter.ToUInt16(buffer.readBuffer, start + 3)) == ModContent.GetInstance<SubworldLibrary>().NetID)
 			{
 				return false;
@@ -849,7 +850,7 @@ namespace SubworldLibrary
 			// The subserver link is still starting up and/or processing its queue,
 			// while this client is trying to connect to the subserver.
 			// Only accept Hello messages into the queue; block everything else.
-			if (link.Connecting && MessageType != MessageID.Hello)
+			if (link.Connecting && messageType != MessageID.Hello)
 			{
 				return true;
 			}
@@ -892,7 +893,23 @@ namespace SubworldLibrary
 
 		private static bool DenySend(ISocket socket, byte[] data, int start, int length, ref object state)
 		{
-			return Thread.CurrentThread.Name != "Subserver Packets" && SubworldSystem.playerLocations.TryGetValue(socket, out int id) && id > -1;
+			if (Thread.CurrentThread.Name == "Subserver Packets")
+			{
+				return false;
+			}
+
+			if (SubworldSystem.playerLocations.TryGetValue(socket, out int id) && id <= -1)
+			{
+				return false;
+			}
+
+			if (data[start + 2] == MessageID.ModPacket && (ModNet.NetModCount < 256 ? data[start + 3] : BitConverter.ToUInt16(data, start + 3)) == ModContent.GetInstance<SubworldLibrary>().NetID
+				&& data[start + (ModNet.NetModCount < 256 ? 4 : 5)] == (byte)SubLibMessageType.MovePlayerOnClient)
+			{
+				return false;
+			}
+
+			return true;
 		}
 
 		private static bool CheckLocalHost(int player)
