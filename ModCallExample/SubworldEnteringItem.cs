@@ -30,7 +30,7 @@ namespace ModCallExample
 
 				if (!result)
 				{
-					//If some issue occured, inform why (can't know exactly obviously, might need to check logs)
+					//If some issue occurred, inform why (can't know exactly obviously, might need to check logs)
 					string message;
 					if (!SubworldManager.Loaded)
 					{

@@ -56,7 +56,7 @@ namespace SubworldLibrary
 			{
 				pipe?.Close();
 				Netplay.Disconnect = true;
-				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occured while writing data to pipe: " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occurred while writing data to pipe: " + e.Message);
 			}
 		}
 
@@ -142,7 +142,7 @@ namespace SubworldLibrary
 			catch (Exception e)
 			{
 				Close();
-				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occured while writing data to pipe " + SubworldSystem.subworlds[worldID].FullName + ": " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occurred while writing data to pipe " + SubworldSystem.subworlds[worldID].FullName + ": " + e.Message);
 			}
 		}
 
@@ -165,7 +165,7 @@ namespace SubworldLibrary
 			catch (Exception e)
 			{
 				Close();
-				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occured while writing data to pipe " + SubworldSystem.subworlds[worldID].FullName + ": " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occurred while writing data to pipe " + SubworldSystem.subworlds[worldID].FullName + ": " + e.Message);
 			}
 		}
 
@@ -1188,7 +1188,7 @@ namespace SubworldLibrary
 			}
 			catch (Exception e)
 			{
-				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occured while reading data from pipe " + subworlds[(int)worldID].FullName + ": " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occurred while reading data from pipe " + subworlds[(int)worldID].FullName + ": " + e.Message);
 			}
 			finally
 			{
@@ -1276,7 +1276,7 @@ namespace SubworldLibrary
 			}
 			catch (Exception e)
 			{
-				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occured while reading main world data: " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occurred while reading main world data: " + e.Message);
 			}
 		}
 
@@ -1358,7 +1358,7 @@ namespace SubworldLibrary
 			}
 			catch (Exception e)
 			{
-				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occured while reading data from pipe: " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occurred while reading data from pipe: " + e.Message);
 			}
 			finally
 			{
@@ -1524,7 +1524,7 @@ namespace SubworldLibrary
 			}
 			catch (Exception e)
 			{
-				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occured while processing serverReadBuffer: " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occurred while processing serverReadBuffer: " + e.Message);
 			}
 			finally
 			{
