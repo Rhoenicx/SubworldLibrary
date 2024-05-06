@@ -761,42 +761,49 @@ namespace SubworldLibrary
 
 		private static void PrepareMessageBuffer(MessageBuffer buffer)
 		{
-			int start = 0;
-			int totalData = buffer.totalData;
-			int writePosition = 0;
-			List<byte> bytes = new();
-
-			while (totalData >= 2)
+			try
 			{
-				int length = (int)BitConverter.ToInt16(buffer.readBuffer, start);
+				int start = 0;
+				int totalData = buffer.totalData;
+				int writePosition = 0;
+				List<byte> bytes = new();
 
-				if (totalData < length)
+				while (totalData >= 2)
 				{
-					continue;
-				}
-				
-				if (buffer.readBuffer[start + 2] != 250
-						|| (ModNet.NetModCount < 256 && buffer.readBuffer[start + 3] != (byte)ModContent.GetInstance<SubworldLibrary>().NetID)
-						|| (ModNet.NetModCount >= 256 && BitConverter.ToUInt16(buffer.readBuffer, start + 3) != ModContent.GetInstance<SubworldLibrary>().NetID))
-				{
+					int length = BitConverter.ToInt16(buffer.readBuffer, start);
+
+					if (totalData < length || length <= 0)
+					{
+						break;
+					}
+
+					if (buffer.readBuffer[start + 2] != 250
+							|| (ModNet.NetModCount < 256 && buffer.readBuffer[start + 3] != (byte)ModContent.GetInstance<SubworldLibrary>().NetID)
+							|| (ModNet.NetModCount >= 256 && BitConverter.ToUInt16(buffer.readBuffer, start + 3) != ModContent.GetInstance<SubworldLibrary>().NetID))
+					{
+						totalData -= length;
+						start += length;
+						continue;
+					}
+
+					for (int i = start; i < start + length; i++)
+					{
+						bytes.Add(buffer.readBuffer[i]);
+					}
+
 					totalData -= length;
-					start += length;
-					continue;
+					Buffer.BlockCopy(buffer.readBuffer, start + length, buffer.readBuffer, start, totalData);
+					writePosition = start + totalData;
 				}
 
-				for (int i = start; i < start + length; i++)
+				for (int i = 0; i < bytes.Count; i++)
 				{
-					bytes.Add(buffer.readBuffer[i]);
+					buffer.readBuffer[writePosition + i] = bytes[i];
 				}
-
-				totalData -= length;
-				Buffer.BlockCopy(buffer.readBuffer, start + length, buffer.readBuffer, start, totalData);
-				writePosition = start + totalData;
 			}
-
-			for (int i = 0; i < bytes.Count; i++)
+			catch (Exception e) 
 			{
-				buffer.readBuffer[writePosition + i] = bytes[i];
+				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occurred while preparing message buffers: " + e.Message);
 			}
 		}
 
