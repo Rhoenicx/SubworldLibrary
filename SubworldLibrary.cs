@@ -27,6 +27,7 @@ namespace SubworldLibrary
 {
 	public class SubworldLibrary : Mod
 	{
+		private static readonly HashSet<byte> AllowedPackets = new() { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 93, 16, 38, 42, 50, 68, 147, 250, 251, 252, 253, 254, 255 };
 		private static ILHook tcpSocketHook;
 		private static ILHook socialSocketHook;
 		private static ILHook handleModPacketHook;
@@ -49,7 +50,7 @@ namespace SubworldLibrary
 				{
 					if (SubworldSystem.sendBroadcasts)
 					{
-						int index = SubworldSystem.CurrentIndex;
+						int index = SubworldSystem.GetIndex();
 						SubworldSystem.BroadcastBetweenServers(
 							messageAuthor,
 							text,
@@ -812,8 +813,8 @@ namespace SubworldLibrary
 			RemoteClient client = Netplay.Clients[buffer.whoAmI];
 			byte messageType = buffer.readBuffer[start + 2];
 
-			// Only accept 'Hello' packets if the client is not connected
-			if (client.State == 0 && messageType != MessageID.Hello)
+			// Only accept specific packets if the client is logging in
+			if (DenyPacket(client.State, messageType))
 			{
 				return true;
 			}
@@ -865,13 +866,15 @@ namespace SubworldLibrary
 			// This keeps the main server from disconnecting this client.
 			client.TimeOutTimer = 0;
 
-			// Copy the data from the readBuffer and send it to the sub server
-			// where the corresponding client is connected.
+			// Copy the data from the readBuffer and send it over the pipe 
+			// to the sub server where the corresponding client is connected.
 			byte[] packet = new byte[length + 1];
 			packet[0] = (byte)buffer.whoAmI;
 			Buffer.BlockCopy(buffer.readBuffer, start, packet, 1, length);
 			link.Send(packet);
 
+			// If the incoming packet is a NetModule-Bestiary,
+			// also let it through on the main server
 			if (packet[3] == MessageID.NetModules)
 			{
 				ushort packetId = BitConverter.ToUInt16(packet, 4);
@@ -886,10 +889,18 @@ namespace SubworldLibrary
 
 		private static bool DenyReadSubServer(MessageBuffer buffer, int start, int length)
 		{
-			// Intentional packet leak: block everything besides Hello when not
-			// successfully logged in (yet). Prevents server from booting the client.
-			RemoteClient client = Netplay.Clients[buffer.whoAmI];
-			if (client.State == 0 && buffer.readBuffer[start + 2] != MessageID.Hello)
+			// Prevents server from booting the client by blocking specific packets
+			return DenyPacket(Netplay.Clients[buffer.whoAmI].State, buffer.readBuffer[start + 2]);
+		}
+
+		private static bool DenyPacket(int state, byte messageType)
+		{
+			if (state == 0 && messageType != MessageID.Hello)
+			{
+				return true;
+			}
+
+			if (state < 10 && !AllowedPackets.Contains(messageType))
 			{
 				return true;
 			}
