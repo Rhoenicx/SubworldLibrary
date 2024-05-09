@@ -1900,11 +1900,6 @@ namespace SubworldLibrary
 
 		internal static void BroadcastBetweenServers(byte messageAuthor, NetworkText text, Color color, ushort worldID, string worldName)
 		{
-			if (!sendBroadcasts && current == null)
-			{
-				return;
-			}
-
 			int netId = ModContent.GetInstance<SubworldLibrary>().NetID;
 
 			// Init stream and writer
@@ -1942,8 +1937,9 @@ namespace SubworldLibrary
 			{
 				foreach (int i in links.Keys)
 				{
-					if (links[i] != null 
-						&& i != worldID)
+					// The broadcast is send to all subservers.
+					// NOTE: Also send to servers that are still Connecting! (Will be queued)
+					if (links[i] != null && i != worldID)
 					{
 						links[i].Send(packet);
 					}

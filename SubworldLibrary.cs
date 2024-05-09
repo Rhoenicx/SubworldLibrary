@@ -27,7 +27,6 @@ namespace SubworldLibrary
 {
 	public class SubworldLibrary : Mod
 	{
-		private static readonly HashSet<byte> AllowedPackets = new() { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 93, 16, 38, 42, 50, 68, 147, 250, 251, 252, 253, 254, 255 };
 		private static ILHook tcpSocketHook;
 		private static ILHook socialSocketHook;
 		private static ILHook handleModPacketHook;
@@ -288,6 +287,23 @@ namespace SubworldLibrary
 
 						c.Emit(Ldloc, index);
 						c.Emit(OpCodes.Call, typeof(SubworldSystem).GetMethod("SyncDisconnect", BindingFlags.NonPublic | BindingFlags.Static));
+					};
+
+					IL_Main.UpdateServer += il =>
+					{
+						ILCursor c = new(il);
+						c.Index = c.Instrs.Count - 1;
+
+						int index = 0;
+						if (c.TryGotoPrev(MoveType.After, i => i.MatchLdsfld<Netplay>("Clients"), i => i.MatchLdloc(out index), i => i.MatchLdelemRef(), i => i.MatchLdfld<RemoteClient>("IsActive"), i => i.MatchBrfalse(out _)))
+						{
+							c.Emit(Ldloc, index);
+							c.Emit(OpCodes.Call, typeof(SubworldLibrary).GetMethod("KeepAliveClient", BindingFlags.NonPublic | BindingFlags.Static));
+						}
+						else
+						{
+							Logger.Error("Failed to apply IL patch into: Main.UpdateServer");
+						}
 					};
 				}
 				else
@@ -900,9 +916,15 @@ namespace SubworldLibrary
 				return true;
 			}
 
-			if (state < 10 && !AllowedPackets.Contains(messageType))
+			if (state < 10)
 			{
-				return true;
+				switch (messageType)
+				{
+					case <= 12 or 16 or 38 or 42 or 50 or 68 or 93 or 147 or >= 250:
+						break;
+					default:
+						return true;
+				}
 			}
 
 			return false;
@@ -910,22 +932,34 @@ namespace SubworldLibrary
 
 		private static bool DenySend(ISocket socket, byte[] data, int start, int length, ref object state)
 		{
+			// Allow the thread "subserver packets" to send packets by default.
 			if (Thread.CurrentThread.Name == "Subserver Packets")
 			{
 				return false;
 			}
 
+			// The client is currently NOT in a subworld. It can accept all packets from main server
 			if (SubworldSystem.playerLocations.TryGetValue(socket, out int id) && id <= -1)
 			{
 				return false;
 			}
+			
+			// => Client is currently inside a subworld, only allow specific packets to be send to the client!
 
-			if (data[start + 2] == MessageID.ModPacket && (ModNet.NetModCount < 256 ? data[start + 3] : BitConverter.ToUInt16(data, start + 3)) == ModContent.GetInstance<SubworldLibrary>().NetID
-				&& data[start + (ModNet.NetModCount < 256 ? 4 : 5)] == (byte)SubLibMessageType.MovePlayerOnClient)
+			// Determine if the current packet belongs to Subworld Library's ModNet
+			if (data[start + 2] == MessageID.ModPacket && (ModNet.NetModCount < 256 ? data[start + 3] : BitConverter.ToUInt16(data, start + 3)) == ModContent.GetInstance<SubworldLibrary>().NetID)
 			{
-				return false;
+				SubLibMessageType type = (SubLibMessageType)data[start + (ModNet.NetModCount < 256 ? 4 : 5)];
+
+				// Let the following packets through:
+				if (type == SubLibMessageType.MovePlayerOnClient
+					|| type == SubLibMessageType.KeepAlive)
+				{
+					return false;
+				}
 			}
 
+			// Block all other packets
 			return true;
 		}
 
@@ -989,6 +1023,23 @@ namespace SubworldLibrary
 			}
 		}
 
+		private static void KeepAliveClient(int player)
+		{
+			// Client is trying to connect to a booting subserver, every 30 seconds send a KeepAlive
+			// to reset the client's and server's TimeOutTimer. Prevents the client from disconnecting.
+			if (SubworldSystem.playerLocations.TryGetValue(Netplay.Clients[player].Socket, out int location)
+				&& location > -1
+				&& SubworldSystem.links.TryGetValue(location, out SubserverLink link)
+				&& link.Connecting
+				&& Netplay.Clients[player].TimeOutTimer != 0
+				&& Netplay.Clients[player].TimeOutTimer % 1800 == 0)
+			{
+				ModPacket packet = ModContent.GetInstance<SubworldLibrary>().GetPacket();
+				packet.Write((byte)SubLibMessageType.KeepAlive);
+				packet.Send();
+			}
+		}
+
 		public override object Call(params object[] args)
 		{
 			try
@@ -1022,6 +1073,21 @@ namespace SubworldLibrary
 
 			switch (messageType)
 			{
+				// Send from main server => client => main server
+				case SubLibMessageType.KeepAlive:
+					{
+						// When received on a client, send a response back to the server
+						if (Main.netMode == NetmodeID.MultiplayerClient)
+						{
+							ModPacket packet = GetPacket();
+							packet.Write((byte)SubLibMessageType.KeepAlive);
+							packet.Send();
+						}
+
+						Logger.Debug("KeepAlive");
+					}
+					break;
+
 				// Always sent from client => main server
 				case SubLibMessageType.BeginEntering:
 					{
@@ -1091,7 +1157,7 @@ namespace SubworldLibrary
 						if (Main.netMode == NetmodeID.Server)
 						{
 							// Main server forwards packets to other server
-							if (SubworldSystem.current == null)
+							if (!SubworldSystem.AnyActive())
 							{
 								SubworldSystem.BroadcastBetweenServers(
 									messageAuthor,
@@ -1101,7 +1167,8 @@ namespace SubworldLibrary
 									worldName);
 							}
 
-							// Send the broadcast to connected clients
+							// Forward the broadcast packet to connected clients on this server.
+							// Only forward when the current server is allowed to display broadcasts messages
 							if (SubworldSystem.receiveBroadcasts && !SubworldSystem.broadcastDenyList.Contains(worldID))
 							{
 								ModPacket packet = GetPacket();
@@ -1158,6 +1225,7 @@ namespace SubworldLibrary
 	internal enum SubLibMessageType : byte
 	{
 		None = 0, // Fail-safe: we should not use 0
+		KeepAlive,
 		BeginEntering,
 		MovePlayerOnServer,
 		MovePlayerOnClient,
