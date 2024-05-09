@@ -1082,9 +1082,14 @@ namespace SubworldLibrary
 							ModPacket packet = GetPacket();
 							packet.Write((byte)SubLibMessageType.KeepAlive);
 							packet.Send();
+
+							Logger.Info("KeepAlive received from server");
 						}
 
-						Logger.Debug("KeepAlive");
+						if (Main.netMode == NetmodeID.Server)
+						{
+							Logger.Info("KeepAlive received from client: " + whoAmI);
+						}
 					}
 					break;
 
