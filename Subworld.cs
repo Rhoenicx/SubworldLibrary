@@ -88,6 +88,13 @@ namespace SubworldLibrary
 		/// </summary>
 		public virtual bool ManualAudioUpdates => false;
 		/// <summary>
+		/// Specifiy the time in seconds this subserver should stay opened in multiplayer after all players have left.
+		/// <br/> Typically not required. Useful for when you anticipate players re-entering the same world within a short period of time.
+		/// <br/> Set to -1 to prevent the subserver from closing. Use <see cref="SubworldSystem.StopSubserver(int)"/> to stop the server manually.
+		/// <br/> CAUTION: If set to -1 or a very long time, the subserver stays opened and keeps consuming precious system resources (CPU/RAM)!
+		/// </summary>
+		public virtual int ServerKeepOpenTime => 0;
+		/// <summary>
 		/// Called when entering a subworld.
 		/// <br/>Before this is called, the return button and underworld's visibility are reset.
 		/// </summary>
@@ -201,5 +208,23 @@ namespace SubworldLibrary
 		/// <br/>Default: false
 		/// </summary>
 		public virtual bool GetLight(Tile tile, int x, int y, ref FastRandom rand, ref Vector3 color) => false;
+		/// <summary>
+		/// Called when the given joinTime of a subserver expired.
+		/// Use <see cref="SubworldSystem.StartSubserver(int, int, int)"/> to reset the timers.
+		/// No players ever joined the sub server when this gets called.
+		/// </summary>
+		public virtual void OnJoinTimeExpired()
+		{
+			
+		}
+		/// <summary>
+		/// Called when the given keepOpenTime of a subserver expired.
+		/// Use <see cref="SubworldSystem.StartSubserver(int, int, int)"/> to reset the timers.
+		/// All players left the sub server when this gets called.
+		/// </summary>
+		public virtual void OnKeepOpenTimeExpired()
+		{
+			
+		}
 	}
 }

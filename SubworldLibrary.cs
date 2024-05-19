@@ -6,7 +6,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -27,6 +26,9 @@ namespace SubworldLibrary
 {
 	public class SubworldLibrary : Mod
 	{
+		internal static SubworldClientConfig clientConfig;
+		internal static SubworldServerConfig serverConfig;
+
 		private static ILHook tcpSocketHook;
 		private static ILHook socialSocketHook;
 		private static ILHook handleModPacketHook;
@@ -59,100 +61,6 @@ namespace SubworldLibrary
 					}
 
 					orig(messageAuthor, text, color, excludedPlayer);
-				};
-
-				IL_Main.DedServ_PostModLoad += il =>
-				{
-					ConstructorInfo gameTime = typeof(GameTime).GetConstructor(Type.EmptyTypes);
-					MethodInfo update = typeof(Main).GetMethod("Update", BindingFlags.NonPublic | BindingFlags.Instance);
-					FieldInfo saveTime = typeof(Main).GetField("saveTime", BindingFlags.NonPublic | BindingFlags.Static);
-
-					var c = new ILCursor(il);
-					ILLabel skip = null;
-					if (!c.TryGotoNext(i => i.MatchBr(out skip)))
-					{
-						Logger.Error("Failed to apply IL patch into: Main.DedServ_PostModLoad");
-						return;
-					}
-
-					c.Emit(OpCodes.Call, typeof(SubworldSystem).GetMethod("LoadIntoSubworld", BindingFlags.NonPublic | BindingFlags.Static));
-					c.Emit(Brfalse, skip);
-
-					c.Emit(Ldarg_0);
-					c.Emit(Newobj, gameTime);
-					c.Emit(Callvirt, update);
-
-					c.Emit(Newobj, typeof(Stopwatch).GetConstructor(Type.EmptyTypes));
-					c.Emit(Stloc_1);
-					c.Emit(Ldloc_1);
-					c.Emit(Callvirt, typeof(Stopwatch).GetMethod("Start"));
-
-					c.Emit(Ldc_I4_0);
-					c.Emit(Stsfld, typeof(Main).GetField("gameMenu"));
-
-					c.Emit(Ldc_R8, 16.666666666666668);
-					c.Emit(Stloc_2);
-					c.Emit(Ldloc_2);
-					c.Emit(Stloc_3);
-
-					var loopStart = c.DefineLabel();
-					c.Emit(Br, loopStart);
-
-					var loop = c.DefineLabel();
-					c.MarkLabel(loop);
-
-					c.Emit(OpCodes.Call, typeof(Main).Assembly.GetType("Terraria.ModLoader.Engine.ServerHangWatchdog").GetMethod("Checkin", BindingFlags.NonPublic | BindingFlags.Static));
-
-					c.Emit(OpCodes.Call, typeof(SubworldLibrary).GetMethod("CheckClients", BindingFlags.NonPublic | BindingFlags.Static));
-
-					c.Emit(Ldsfld, typeof(Netplay).GetField("HasClients"));
-					var label = c.DefineLabel();
-					c.Emit(Brfalse, label);
-
-					c.Emit(Ldarg_0);
-					c.Emit(Newobj, gameTime);
-					c.Emit(Callvirt, update);
-					var label2 = c.DefineLabel();
-					c.Emit(Br, label2);
-
-					c.MarkLabel(label);
-
-					c.Emit(Ldsfld, saveTime);
-					c.Emit(Callvirt, typeof(Stopwatch).GetMethod("get_IsRunning"));
-					c.Emit(Brfalse, label2);
-
-					c.Emit(Ldsfld, saveTime);
-					c.Emit(Callvirt, typeof(Stopwatch).GetMethod("Stop"));
-					c.Emit(Br, label2);
-
-					c.MarkLabel(label2);
-
-					c.Emit(Ldloc_1);
-					c.Emit(Ldloc_2);
-					c.Emit(Ldloca, 3);
-					c.Emit(OpCodes.Call, typeof(SubworldLibrary).GetMethod("Sleep", BindingFlags.NonPublic | BindingFlags.Static));
-
-					c.MarkLabel(loopStart);
-
-					c.Emit(Ldsfld, typeof(Netplay).GetField("Disconnect"));
-					c.Emit(Brfalse, loop);
-
-					c.Emit(Ldsfld, current);
-					c.Emit(Callvirt, shouldSave);
-					label = c.DefineLabel();
-					c.Emit(Brfalse, label);
-					c.Emit(OpCodes.Call, typeof(WorldFile).GetMethod("SaveWorld", Type.EmptyTypes));
-					c.MarkLabel(label);
-
-					c.Emit(OpCodes.Call, typeof(SystemLoader).GetMethod("OnWorldUnload"));
-
-					c.Emit(Ret);
-				};
-
-				IL_Netplay.UpdateServerInMainThread += il =>
-				{
-					ILCursor c = new(il) { Index = il.Body.Instructions.Count - 1 };
-					c.Emit(OpCodes.Call, typeof(SubworldSystem).GetMethod("ProcessServerMessageBuffer", BindingFlags.NonPublic | BindingFlags.Static));
 				};
 
 				IL_NetMessage.CheckBytes += il =>
@@ -198,6 +106,21 @@ namespace SubworldLibrary
 
 				if (!Program.LaunchParameters.ContainsKey("-subworld"))
 				{
+					IL_Main.DedServ_PostModLoad += il =>
+					{
+						ILCursor c = new(il);
+						if (!c.TryGotoNext(MoveType.After,
+							i => i.MatchCall("Terraria.ModLoader.Engine.ServerHangWatchdog", "Checkin")))
+						{
+							Logger.Error("Failed to apply IL patch into: Main.DedServ_PostModLoad");
+							return;
+						}
+
+						c.Emit(OpCodes.Call, typeof(SubworldSystem).GetMethod("ProcessServerMessageBuffer", BindingFlags.NonPublic | BindingFlags.Static));
+
+						c.Emit(OpCodes.Call, typeof(SubworldSystem).GetMethod("UpdateSubserverLinks", BindingFlags.NonPublic | BindingFlags.Static));
+					};
+
 					IL_NetMessage.DoesPlayerSlotCountAsAHost += il =>
 					{
 						ILCursor c = new(il);
@@ -308,6 +231,98 @@ namespace SubworldLibrary
 				}
 				else
 				{
+					IL_Main.DedServ_PostModLoad += il =>
+					{
+						ConstructorInfo gameTime = typeof(GameTime).GetConstructor(Type.EmptyTypes);
+						MethodInfo update = typeof(Main).GetMethod("Update", BindingFlags.NonPublic | BindingFlags.Instance);
+						FieldInfo saveTime = typeof(Main).GetField("saveTime", BindingFlags.NonPublic | BindingFlags.Static);
+
+						var c = new ILCursor(il);
+						ILLabel skip = null;
+						if (!c.TryGotoNext(i => i.MatchBr(out skip)))
+						{
+							Logger.Error("Failed to apply IL patch into: Main.DedServ_PostModLoad");
+							return;
+						}
+
+						c.Emit(OpCodes.Call, typeof(SubworldSystem).GetMethod("LoadIntoSubworld", BindingFlags.NonPublic | BindingFlags.Static));
+						c.Emit(Brfalse, skip);
+
+						c.Emit(Ldarg_0);
+						c.Emit(Newobj, gameTime);
+						c.Emit(Callvirt, update);
+
+						c.Emit(Newobj, typeof(Stopwatch).GetConstructor(Type.EmptyTypes));
+						c.Emit(Stloc_1);
+						c.Emit(Ldloc_1);
+						c.Emit(Callvirt, typeof(Stopwatch).GetMethod("Start"));
+
+						c.Emit(Ldc_I4_0);
+						c.Emit(Stsfld, typeof(Main).GetField("gameMenu"));
+
+						c.Emit(Ldc_R8, 16.666666666666668);
+						c.Emit(Stloc_2);
+						c.Emit(Ldloc_2);
+						c.Emit(Stloc_3);
+
+						var loopStart = c.DefineLabel();
+						c.Emit(Br, loopStart);
+
+						var loop = c.DefineLabel();
+						c.MarkLabel(loop);
+
+						c.Emit(OpCodes.Call, typeof(Main).Assembly.GetType("Terraria.ModLoader.Engine.ServerHangWatchdog").GetMethod("Checkin", BindingFlags.NonPublic | BindingFlags.Static));
+
+						c.Emit(OpCodes.Call, typeof(SubworldSystem).GetMethod("ProcessServerMessageBuffer", BindingFlags.NonPublic | BindingFlags.Static));
+
+						c.Emit(OpCodes.Call, typeof(MainserverLink).GetMethod("Update", BindingFlags.Public | BindingFlags.Static));
+
+						c.Emit(OpCodes.Call, typeof(SubworldLibrary).GetMethod("CheckClients", BindingFlags.NonPublic | BindingFlags.Static));
+
+						c.Emit(Ldsfld, typeof(Netplay).GetField("HasClients"));
+						var label = c.DefineLabel();
+						c.Emit(Brfalse, label);
+
+						c.Emit(Ldarg_0);
+						c.Emit(Newobj, gameTime);
+						c.Emit(Callvirt, update);
+						var label2 = c.DefineLabel();
+						c.Emit(Br, label2);
+
+						c.MarkLabel(label);
+
+						c.Emit(Ldsfld, saveTime);
+						c.Emit(Callvirt, typeof(Stopwatch).GetMethod("get_IsRunning"));
+						c.Emit(Brfalse, label2);
+
+						c.Emit(Ldsfld, saveTime);
+						c.Emit(Callvirt, typeof(Stopwatch).GetMethod("Stop"));
+						c.Emit(Br, label2);
+
+						c.MarkLabel(label2);
+
+						c.Emit(Ldloc_1);
+						c.Emit(Ldloc_2);
+						c.Emit(Ldloca, 3);
+						c.Emit(OpCodes.Call, typeof(SubworldLibrary).GetMethod("Sleep", BindingFlags.NonPublic | BindingFlags.Static));
+
+						c.MarkLabel(loopStart);
+
+						c.Emit(Ldsfld, typeof(Netplay).GetField("Disconnect"));
+						c.Emit(Brfalse, loop);
+
+						c.Emit(Ldsfld, current);
+						c.Emit(Callvirt, shouldSave);
+						label = c.DefineLabel();
+						c.Emit(Brfalse, label);
+						c.Emit(OpCodes.Call, typeof(WorldFile).GetMethod("SaveWorld", Type.EmptyTypes));
+						c.MarkLabel(label);
+
+						c.Emit(OpCodes.Call, typeof(SystemLoader).GetMethod("OnWorldUnload"));
+
+						c.Emit(Ret);
+					};
+
 					IL_NetMessage.CheckBytes += il =>
 					{
 						ILCursor c, cc;
@@ -776,6 +791,16 @@ namespace SubworldLibrary
 			};
 		}
 
+		public override void Unload()
+		{
+			clientConfig = null;
+			serverConfig = null;
+			tcpSocketHook = null;
+			socialSocketHook = null;
+			handleModPacketHook = null;
+			cacheMessage = null;
+		}
+
 		private static void PrepareMessageBuffer(MessageBuffer buffer)
 		{
 			try
@@ -949,13 +974,13 @@ namespace SubworldLibrary
 			// Determine if the current packet belongs to Subworld Library's ModNet
 			if (data[start + 2] == MessageID.ModPacket && (ModNet.NetModCount < 256 ? data[start + 3] : BitConverter.ToUInt16(data, start + 3)) == ModContent.GetInstance<SubworldLibrary>().NetID)
 			{
-				SubLibMessageType type = (SubLibMessageType)data[start + (ModNet.NetModCount < 256 ? 4 : 5)];
+				SubLibMessageType messageType = (SubLibMessageType)data[start + (ModNet.NetModCount < 256 ? 4 : 5)];
 
-				// Let the following packets through:
-				if (type == SubLibMessageType.MovePlayerOnClient
-					|| type == SubLibMessageType.KeepAlive)
+				switch (messageType)
 				{
-					return false;
+					case SubLibMessageType.MovePlayerOnClient:
+					case SubLibMessageType.KeepAlive:
+						return false;
 				}
 			}
 
@@ -985,6 +1010,7 @@ namespace SubworldLibrary
 			Thread.Sleep((int)remaining);
 		}
 
+		// Replicated vanilla UpdateConnectedClients
 		private static void CheckClients()
 		{
 			bool connection = false;
@@ -996,31 +1022,37 @@ namespace SubworldLibrary
 					if (client.PendingTerminationApproved)
 					{
 						client.Reset();
+						NetMessage.SyncDisconnectedPlayer(i);
+					}
+				}
+				else if (client.IsConnected())
+				{
+					if (!client.IsActive)
+					{
+						client.State = 0;
+						client.IsActive = true;
+					}
 
-						NetMessage.SendData(14, -1, i, null, i, 0);
-						ChatHelper.BroadcastChatMessage(NetworkText.FromKey(Lang.mp[20].Key, client.Name), new Color(255, 240, 20), i);
+					connection = true;
+				}
+				else if (client.IsActive)
+				{
+					MethodInfo setPendingTerminationMethod = typeof(RemoteClient).GetMethod("SetPendingTermination", BindingFlags.Instance | BindingFlags.NonPublic);
+					setPendingTerminationMethod.Invoke(client, new object[] { "Connection lost" });
+					client.PendingTerminationApproved = true;
+				}
+				else
+				{
+					bool active = Main.player[i].active;
+					Main.player[i].active = false;
+					if (active)
+					{ 
 						Player.Hooks.PlayerDisconnect(i);
 					}
-					continue;
-				}
-				if (client.State > 0)
-				{
-					connection = true;
-					break;
 				}
 			}
 
-			if (!Netplay.HasClients)
-			{
-				Netplay.HasClients = connection;
-				return;
-			}
-
-			if (!connection)
-			{
-				Netplay.Disconnect = true;
-				Netplay.HasClients = false;
-			}
+			Netplay.HasClients = connection;
 		}
 
 		private static void KeepAliveClient(int player)
@@ -1031,6 +1063,7 @@ namespace SubworldLibrary
 				&& location > -1
 				&& SubworldSystem.links.TryGetValue(location, out SubserverLink link)
 				&& link.Connecting
+				&& Netplay.Clients[player].Socket.IsConnected()
 				&& Netplay.Clients[player].TimeOutTimer != 0
 				&& Netplay.Clients[player].TimeOutTimer % 1800 == 0)
 			{
@@ -1098,7 +1131,8 @@ namespace SubworldLibrary
 					{
 						ushort id = reader.ReadUInt16();
 
-						if (Main.netMode == NetmodeID.Server && !SubworldSystem.noReturn)
+						// Only process the action on the main server
+						if (Main.netMode == NetmodeID.Server && !SubworldSystem.AnyActive() && !SubworldSystem.noReturn)
 						{
 							SubworldSystem.MovePlayerToSubserver(whoAmI, id);
 						}
@@ -1109,14 +1143,10 @@ namespace SubworldLibrary
 				// Sent from main server => sub server
 				case SubLibMessageType.MovePlayerOnServer:
 					{
-						if (Main.netMode == NetmodeID.Server && SubworldSystem.current != null)
+						// Only process the action on sub servers
+						if (Main.netMode == NetmodeID.Server && SubworldSystem.AnyActive())
 						{
-							Netplay.Clients[whoAmI].Reset();
-
-							NetMessage.SendData(14, -1, whoAmI, null, whoAmI, 0);
-							ChatHelper.BroadcastChatMessage(NetworkText.FromKey(Lang.mp[20].Key, Netplay.Clients[whoAmI].Name), new Color(255, 240, 20), whoAmI);
-							Player.Hooks.PlayerDisconnect(whoAmI);
-
+							Netplay.Clients[whoAmI].Socket.Close();
 							CheckClients();
 						}
 					}
@@ -1223,6 +1253,26 @@ namespace SubworldLibrary
 							worldName);
 					}
 					break;
+
+				case SubLibMessageType.StopSubserver:
+					{ 
+						ushort id = reader.ReadUInt16();
+
+						if (Main.netMode == NetmodeID.Server)
+						{
+							break;
+						}
+
+						if (!SubworldSystem.AnyActive())
+						{
+							SubworldSystem.StopSubserver(id);
+						}
+						else
+						{
+							MainserverLink.Disconnect();
+						}
+					}
+					break;
 			}
 		}
 	}
@@ -1237,6 +1287,7 @@ namespace SubworldLibrary
 		SendToMainServer,
 		SendToSubserver,
 		BroadcastBetweenServers,
-		Broadcast
+		Broadcast,
+		StopSubserver
 	}
 }

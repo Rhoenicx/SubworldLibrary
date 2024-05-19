@@ -1,6 +1,30 @@
 Mods: {
 	SubworldLibrary: {
 		Return: Return
-		Move: "{0} has gone to {1}."
+
+		Configs: {
+			SubworldClientConfig: {
+				DisplayName: Subworld Library Client Config
+
+				HideWorldName: {
+					Label: Hide world name
+					Tooltip: When enabled, hide the world names in front of all chat messages.
+				}
+			}
+
+			SubworldServerConfig: {
+				DisplayName: Subworld Library Server Config
+
+				SubserverStartupTimeMax: {
+					Label: Subserver maximum startup time
+					Tooltip:
+						'''
+						The maximum amount of time in seconds a subserver is allowed to take when starting up.
+						If the subserver is not connected within this time it will be automatically terminated!
+						Increase this time to give subservers more time to start up and load mods.
+						'''
+				}
+			}
+		}
 	}
 }
