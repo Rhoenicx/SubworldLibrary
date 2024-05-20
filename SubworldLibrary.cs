@@ -16,6 +16,7 @@ using Terraria.Graphics.Light;
 using Terraria.ID;
 using Terraria.IO;
 using Terraria.Localization;
+using Terraria.Map;
 using Terraria.ModLoader;
 using Terraria.Net;
 using Terraria.Net.Sockets;
@@ -1161,6 +1162,13 @@ namespace SubworldLibrary
 						if (Main.netMode == NetmodeID.MultiplayerClient)
 						{ 
 							Task.Factory.StartNew(SubworldSystem.ExitWorldCallBack, id < ushort.MaxValue ? id : -1);
+							
+							// Overwrite the statustext to display connection message during the loading screen
+							if (id < SubworldSystem.subworlds.Count)
+							{
+								Main.statusText = Language.GetTextValue("Net.ConnectingTo", (object)SubworldSystem.subworlds[id].DisplayName.Value) + "...";
+								MapHelper.noStatusText = true;
+							}
 						}
 					}
 					break;
