@@ -15,11 +15,20 @@ Mods: {
 			SubworldServerConfig: {
 				// DisplayName: Subworld Library Server Config
 
+				EnableSubserverStartupTime: {
+					// Label: Enable subserver maximum startup time
+					/* Tooltip:
+						'''
+						Enables the watchdog timer for starting subservers. Use the Subserver maximum startup
+						time to specifiy the maximum time.
+						''' */
+				}
+
 				SubserverStartupTimeMax: {
 					// Label: Subserver maximum startup time
 					/* Tooltip:
 						'''
-						The maximum amount of time in seconds a subserver is allowed to take when starting up.
+						The maximum amount of time in minutes a subserver is allowed to take when starting up.
 						If the subserver is not connected within this time it will be automatically terminated!
 						Increase this time to give subservers more time to start up and load mods.
 						''' */

@@ -28,7 +28,6 @@ using Terraria.WorldBuilding;
 
 namespace SubworldLibrary
 {
-
 	internal class ServerMessageBuffer
 	{
 		public const int MaxBufferLength = 131070;
@@ -53,7 +52,7 @@ namespace SubworldLibrary
 			ResetReader();
 		}
 
-		public void ResetReader() 
+		public void ResetReader()
 		{
 			stream?.Close();
 			stream = new MemoryStream(buffer);
@@ -104,6 +103,7 @@ namespace SubworldLibrary
 		/// <br/>Its value is reset before <see cref="Subworld.OnEnter"/> is called, and after <see cref="Subworld.OnExit"/> is called.
 		/// </summary>
 		public static bool noReturn;
+
 		/// <summary>
 		/// Hides the Underworld background.
 		/// <br/>Its value is reset before <see cref="Subworld.OnEnter"/> is called, and after <see cref="Subworld.OnExit"/> is called.
@@ -147,29 +147,39 @@ namespace SubworldLibrary
 		/// <code>SubworldSystem.IsActive("MyMod/MySubworld")</code>
 		/// </summary>
 		public static bool IsActive(string id) => current?.FullName == id;
+
+		/// <summary>
+		/// Returns true if the current subworld's id matches the specified id.
+		/// </summary>
+		public static bool IsActive(int id) => id == GetIndex();
+
 		/// <summary>
 		/// Returns true if the specified subworld is active.
 		/// </summary>
 		public static bool IsActive<T>() where T : Subworld => current?.GetType() == typeof(T);
+
 		/// <summary>
 		/// Returns true if not in the main world.
 		/// </summary>
 		public static bool AnyActive() => current != null;
+
 		/// <summary>
 		/// Returns true if the current subworld is from the specified mod.
 		/// </summary>
 		public static bool AnyActive(Mod mod) => current?.Mod == mod;
+
 		/// <summary>
 		/// Returns true if the current subworld is from the specified mod.
 		/// </summary>
 		public static bool AnyActive<T>() where T : Mod => current?.Mod == ModContent.GetInstance<T>();
+
 		/// <summary>
 		/// The current subworld's file path.
 		/// </summary>
 		public static string CurrentPath => Path.Combine(Main.WorldPath, Path.GetFileNameWithoutExtension(main.Path), current.FileName + ".wld");
 
 		/// <summary>
-		/// Tries to enter the subworld with the specified ID.
+		/// Tries to enter the subworld with the specified name.
 		/// <code>SubworldSystem.Enter("MyMod/MySubworld")</code>
 		/// </summary>
 		public static bool Enter(string id)
@@ -186,6 +196,26 @@ namespace SubworldLibrary
 					BeginEntering(i);
 					return true;
 				}
+			}
+			return false;
+		}
+
+		/// <summary>
+		/// Tries to enter the subworld with the specified ID.
+		/// <br/>Use <see cref="SubworldSystem.GetIndex()"/> or overloads to get the internal subworld ID.
+		/// <br/>Only works for entering subworlds; not the main world.
+		/// </summary>
+		public static bool Enter(int id)
+		{
+			if (current != cache)
+			{
+				return false;
+			}
+
+			if (id >= 0 && id < subworlds.Count)
+			{
+				BeginEntering(id);
+				return true;
 			}
 			return false;
 		}
@@ -231,11 +261,10 @@ namespace SubworldLibrary
 				return;
 			}
 
-			// Index and current subworld ID is the same, 
-			// exit the subworld by going to the returnDestination
-			if (current != null && GetIndex() == index)
+			// Given id and current subworld ID is the same, do nothing
+			if (index == GetIndex())
 			{
-				index = current.ReturnDestination;
+				return;
 			}
 
 			// int.MinValue represents exit to main menu.
@@ -307,7 +336,7 @@ namespace SubworldLibrary
 			{
 				if (subworlds[i].GetType() == typeof(T))
 				{
-					if (Main.netMode == 0)
+					if (Main.netMode == NetmodeID.SinglePlayer)
 					{
 						BeginEntering(i);
 						break;
@@ -316,6 +345,29 @@ namespace SubworldLibrary
 					MovePlayerToSubserver(player, (ushort)i);
 					break;
 				}
+			}
+		}
+
+		/// <summary>
+		/// Send the specified player to the subworld with the specified id.
+		/// </summary>
+		public static void MovePlayerToSubworld(int id, int player)
+		{
+			if (Main.netMode == NetmodeID.MultiplayerClient
+				|| (Main.netMode == NetmodeID.Server && AnyActive()))
+			{
+				return;
+			}
+
+			if (id >= 0 && id < subworlds.Count)
+			{
+				if (Main.netMode == NetmodeID.SinglePlayer)
+				{
+					BeginEntering(id);
+					return;
+				}
+
+				MovePlayerToSubserver(player, (ushort)id);
 			}
 		}
 
@@ -331,15 +383,18 @@ namespace SubworldLibrary
 			Mod subLib = ModContent.GetInstance<SubworldLibrary>();
 			RemoteClient client = Netplay.Clients[player];
 
+			// Determine if the client is currently in a subworld. Also get the corresponding location.
 			bool inSubworld = playerLocations.TryGetValue(client.Socket, out int location) && location >= 0;
+
+			// Do nothing when trying to join the same world, or when
+			// the requested server is in a disconnecting state.
+			if (id == location || (id == ushort.MaxValue && location == -1) || (links.ContainsKey(id) && links[id].Disconnecting))
+			{
+				return;
+			}
+
 			if (inSubworld)
 			{
-				// When trying to enter the same world, go to the returnDestination instead
-				if (id == location)
-				{
-					id = subworlds[location].ReturnDestination < 0 ? ushort.MaxValue : (ushort)subworlds[location].ReturnDestination;
-				}
-
 				// Send a client disconnect packet to the sub server which currently contains this client.
 				if (links.ContainsKey(location))
 				{
@@ -379,13 +434,6 @@ namespace SubworldLibrary
 			// The client is returning to the main server
 			// terminate here since it already got send a packet.
 			if (id == ushort.MaxValue)
-			{
-				return;
-			}
-
-			// The requested subserver is currently disconnecting.
-			// Cancel the join attempt
-			if (links.ContainsKey(id) && links[id].Disconnecting)
 			{
 				return;
 			}
@@ -448,19 +496,22 @@ namespace SubworldLibrary
 
 		/// <summary>
 		/// Starts a subserver for the subworld with the specified ID, if one is not running already.
-		/// Additionally enter the time in seconds a subworld should stay opened after launching without players.
-		/// -1 for indefinite. Server need to be manually closed using StopSubserver!
+		/// Optionally:
+		/// - joinTime:		Time that the subserver stays on after booting up without players.
+		/// - keepOpenTime:	Time that the subserver stays on after all players left.
 		/// </summary>
 		public static void StartSubserver(int id, int joinTime = int.MinValue, int keepOpenTime = int.MinValue)
 		{
-			if (links.ContainsKey(id))
+			// Only run on servers and when specified id is valid
+			if (Main.netMode != NetmodeID.Server || current != null || id < 0 || id >= subworlds.Count)
 			{
-				links[id].Refresh(joinTime, keepOpenTime);
 				return;
 			}
 
-			if (id < 0 || id >= ushort.MaxValue)
+			// If the subserver is already running, override and/or refresh timers
+			if (links.ContainsKey(id))
 			{
+				links[id].Refresh(joinTime, keepOpenTime);
 				return;
 			}
 
@@ -500,12 +551,12 @@ namespace SubworldLibrary
 		/// <summary>
 		/// Stops the subserver with the specified id, tries to gracefully close the server and pipes.<br/>
 		/// When this is called on the main server it will close the respective sub server.<br/>
-		/// When this is called on a sub server a stop request for this sub server is sent to the main server
+		/// When this is called on a sub server a stop request for the sub server is sent to the main server
 		/// </summary>
 		public static void StopSubserver(int id)
 		{
-			// Only run on servers or specified id is invalid
-			if (Main.netMode != NetmodeID.Server || id < 0)
+			// Only run on servers and when specified id is valid
+			if (Main.netMode != NetmodeID.Server || id < 0 || id >= subworlds.Count)
 			{
 				return;
 			}
@@ -523,7 +574,7 @@ namespace SubworldLibrary
 			}
 
 			// Main server requests to close the specified sub server
-			if (!AnyActive())
+			if (current == null)
 			{
 				if (links.ContainsKey(id))
 				{
@@ -651,7 +702,7 @@ namespace SubworldLibrary
 		/// </summary>
 		public static void SendToAllSubservers(Mod mod, byte[] data)
 		{
-			if (Main.netMode != 2 || current != null)
+			if (Main.netMode != NetmodeID.Server || current != null)
 			{
 				return;
 			}
@@ -694,7 +745,7 @@ namespace SubworldLibrary
 		/// </summary>
 		public static void SendToMainServer(Mod mod, byte[] data)
 		{
-			if (Main.netMode != 2 || current == null)
+			if (Main.netMode != NetmodeID.Server || current == null)
 			{
 				return;	
 			}
@@ -845,9 +896,9 @@ namespace SubworldLibrary
 			Main.hardMode = copiedData.Get<bool>("hardMode");
 
 			// i'm sorry that was mean
-			using (MemoryStream stream = new MemoryStream(copiedData.Get<byte[]>("bestiary")))
+			using (MemoryStream stream = new(copiedData.Get<byte[]>("bestiary")))
 			{
-				using BinaryReader reader = new BinaryReader(stream);
+				using BinaryReader reader = new(stream);
 
 				FieldInfo field = typeof(NPCKillsTracker).GetField("_killCountsByNpcId", BindingFlags.NonPublic | BindingFlags.Instance);
 				Dictionary<string, int> kills = (Dictionary<string, int>)field.GetValue(Main.BestiaryTracker.Kills);
@@ -876,9 +927,9 @@ namespace SubworldLibrary
 					chats.Add(reader.ReadString());
 				}
 			}
-			using (MemoryStream stream = new MemoryStream(copiedData.Get<byte[]>("powers")))
+			using (MemoryStream stream = new(copiedData.Get<byte[]>("powers")))
 			{
-				using BinaryReader reader = new BinaryReader(stream);
+				using BinaryReader reader = new(stream);
 
 				FieldInfo field = typeof(CreativePowerManager).GetField("_powersById", BindingFlags.NonPublic | BindingFlags.Instance);
 				Dictionary<ushort, ICreativePower> powers = (Dictionary<ushort, ICreativePower>)field.GetValue(CreativePowerManager.Instance);
@@ -1037,7 +1088,7 @@ namespace SubworldLibrary
 					// Setup the link to the main server
 					MainserverLink.Connect(current.FileName);
 
-					// Pipe failed to connect
+					// Pipe failed to connect => close the server
 					if (Netplay.Disconnect || MainserverLink.Disconnecting)
 					{
 						Main.instance.Exit();

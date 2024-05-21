@@ -92,7 +92,7 @@ namespace SubworldLibrary
 			}
 			catch (Exception e)
 			{
-				SubworldSystem.StopSubserver(_id);
+				Close();
 				ModContent.GetInstance<SubworldLibrary>().Logger.Warn(Main.worldName + " - Exception occurred while waiting for pipeIN to connect " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
 			}
 		}
@@ -187,16 +187,17 @@ namespace SubworldLibrary
 				try
 				{	
 					bool exited = _process.HasExited;
-					bool timedOut = _watchdog?.ElapsedMilliseconds > SubworldLibrary.serverConfig.SubserverStartupTimeMax * 1000;
+					bool timedOut = SubworldLibrary.serverConfig.EnableSubserverStartupTime && _watchdog?.ElapsedMilliseconds > SubworldLibrary.serverConfig.SubserverStartupTimeMax * 60000;
 					
-					// The subserver takes too long to start up or the process has been terminated by an external factor.
 					if (timedOut || exited)
 					{
+						// The subserver process has been closed abruptly. This was due to some external factor.
 						if (!timedOut && exited)
 						{
 							ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Process of subworld " + SubworldSystem.subworlds[_id].FullName + " got closed abruptly!");
 						}
 
+						// The startup timer has been expired, terminate the subserver process.
 						if (!exited)
 						{ 
 							ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Subworld " + SubworldSystem.subworlds[_id].FullName + " took too long to start up! Try increasing timeout in server config");
@@ -209,7 +210,7 @@ namespace SubworldLibrary
 				catch (Exception e)
 				{
 					Close();
-					ModContent.GetInstance<SubworldLibrary>().Logger.Warn(Main.worldName + " - Exception occurred checking process " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
+					ModContent.GetInstance<SubworldLibrary>().Logger.Warn(Main.worldName + " - Exception occurred handling process " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
 				}
 
 				return;
@@ -238,16 +239,20 @@ namespace SubworldLibrary
 				_playersHasBeenConnected = true;
 			}
 
-			// No player has been connected and the timeout time has been expired
+			// No player has been connected
 			if (!_playersHasBeenConnected)
 			{
+				// JoinTime and KeepOpen is not infinite, and joinTime has expired
 				if (_joinTime != -1 && _keepOpenTime != -1 && _watchdog?.ElapsedMilliseconds > _joinTime * 1000)
 				{
 					if (_id >= 0 && _id < SubworldSystem.subworlds.Count)
 					{
+						// Give the subworld a chance to react on the server close request.
+						// Here is where StartServer() should be called again to refresh timers.
 						SubworldSystem.subworlds[_id].OnJoinTimeExpired();
 					}
 
+					// Check the timer again; if not reset during OnJoinTimeExpired => close server
 					if (_watchdog?.ElapsedMilliseconds > _joinTime * 1000)
 					{
 						Disconnect();
@@ -257,14 +262,17 @@ namespace SubworldLibrary
 				return;
 			}
 
-			// Close the server after the keepOpenTime expired
+			// No players are present, the keepOpen time is not infinite and has been expired
 			if (!playersPresent && _keepOpenTime != -1 && _watchdog?.ElapsedMilliseconds > _keepOpenTime * 1000)
 			{
 				if (_id >= 0 && _id < SubworldSystem.subworlds.Count)
 				{
+					// Give the subworld a chance to react on the server close request.
+					// Here is where StartServer() should be called again to refresh timers.
 					SubworldSystem.subworlds[_id].OnKeepOpenTimeExpired();
 				}
 
+				// Check the timer again; if not reset during OnKeepOpenTimeExpired => close server
 				if (_watchdog?.ElapsedMilliseconds > _keepOpenTime * 1000)
 				{
 					Disconnect();
@@ -276,11 +284,13 @@ namespace SubworldLibrary
 		{
 			if (!Disconnecting)
 			{
+				// Apply the new given joinTime
 				if (joinTime != int.MinValue)
 				{ 
 					_joinTime = joinTime;
 				}
 
+				// Apply the new given keepOpenTime
 				if (keepOpenTime != int.MinValue)
 				{ 
 					_keepOpenTime = keepOpenTime;
@@ -292,12 +302,12 @@ namespace SubworldLibrary
 
 		public void Disconnect()
 		{
-			// only when not already disconnecting
+			// Only when not already disconnecting
 			if (Disconnecting)
 			{
 				return;
 			}
-
+			
 			// Set Disconnect and restart timer
 			Disconnecting = true;
 			_watchdog?.Restart();

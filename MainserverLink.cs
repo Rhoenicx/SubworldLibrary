@@ -17,13 +17,16 @@ namespace SubworldLibrary
 
 		public static void Connect(string name)
 		{ 
+			// Initialize the subserver pipes.
 			PipeIn = new NamedPipeClientStream(".", name + "_IN", PipeDirection.In);
 			PipeOut = new NamedPipeClientStream(".", name + "_OUT", PipeDirection.Out);
 
 			try
 			{
-				PipeIn.Connect();
-				PipeOut.Connect();
+				// Try to connect both pipes to the waiting main server.
+				// If this does not complete within a second => error and close.
+				PipeIn.Connect(1000);
+				PipeOut.Connect(1000);
 			}
 			catch (Exception e) 
 			{

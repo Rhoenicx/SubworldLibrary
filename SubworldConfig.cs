@@ -7,11 +7,15 @@ namespace SubworldLibrary
 	{
 		public override ConfigScope Mode => ConfigScope.ServerSide;
 
+		// Enables the watchdog for starting up a subserver
+		[DefaultValue(false)]
+		public bool EnableSubserverStartupTime;
+
 		// Setting for maximum time a subserver may spend starting up.
-		// During this time the server loads mods.
+		// During this time the server loads mods. Set in minutes.
 		[DefaultValue(120)]
 		[Slider]
-		[Range(30, 600)]
+		[Range(1, 30)]
 		public int SubserverStartupTimeMax;
 
 		public override void OnLoaded()
