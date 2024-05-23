@@ -384,13 +384,13 @@ namespace SubworldLibrary
 						case SubLibMessageType.Broadcast:
 							{
 								RemoteClient client = Netplay.Clients[packetInfo[0]];
-								if (client.IsConnected())
+								if (client.IsConnected() && SubworldSystem.playerLocations[client.Socket] == _id && client.State == 10)
 								{
 									try 
 									{ 
 										client.Socket.AsyncSend(data, 0, length, (state) => { }); 
 									}
-									catch (Exception e) 
+									catch (Exception e)
 									{
 										ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Exception occurred client AsyncSend " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
 									}
