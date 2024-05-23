@@ -31,7 +31,7 @@ namespace SubworldLibrary
 			catch (Exception e) 
 			{
 				Close();
-				ModContent.GetInstance<SubworldLibrary>().Logger.Warn(Main.worldName + " - Exception occurred while connecting pipes " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Exception occurred while connecting pipes: " + e.Message);
 			}
 		}
 
@@ -56,7 +56,7 @@ namespace SubworldLibrary
 			catch (Exception e)
 			{
 				Close();
-				ModContent.GetInstance<SubworldLibrary>().Logger.Warn(Main.worldName + " - Exception occurred while writing data to pipeOut: " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Exception occurred while writing data pipeOut: " + e.Message);
 			}
 		}
 
@@ -172,7 +172,7 @@ namespace SubworldLibrary
 			}
 			catch (Exception e)
 			{
-				ModContent.GetInstance<SubworldLibrary>().Logger.Warn(Main.worldName + " - Exception occurred while reading data from pipe: " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Exception occurred while reading data pipeIn: " + e.Message);
 			}
 			finally
 			{

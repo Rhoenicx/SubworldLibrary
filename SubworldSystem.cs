@@ -561,7 +561,24 @@ namespace SubworldLibrary
 				return;
 			}
 
-			// Create packet
+			// Main server requests to close the specified sub server
+			if (current == null)
+			{
+				if (links.ContainsKey(id))
+				{
+					links[id].Disconnect();
+				}
+			}
+
+			// Subserver requested to be closed
+			else
+			{
+				MainserverLink.Send(GetStopSubserverPacket(id));
+			}
+		}
+
+		internal static byte[] GetStopSubserverPacket(int id)
+		{
 			int netId = ModContent.GetInstance<SubworldLibrary>().NetID;
 			byte[] data;
 			if (ModNet.NetModCount < 256)
@@ -573,20 +590,7 @@ namespace SubworldLibrary
 				data = new byte[9] { 0, 8, 0, 250, (byte)netId, (byte)(netId >> 8), (byte)SubLibMessageType.StopSubserver, (byte)id, (byte)(id >> 8) };
 			}
 
-			// Main server requests to close the specified sub server
-			if (current == null)
-			{
-				if (links.ContainsKey(id))
-				{
-					links[id].Send(data);
-					links[id].Disconnect();
-				}
-			}
-			// Subserver requested to be closed
-			else
-			{
-				MainserverLink.Send(data);
-			}
+			return data;
 		}
 
 		/// <summary>

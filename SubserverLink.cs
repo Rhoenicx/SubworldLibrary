@@ -93,7 +93,7 @@ namespace SubworldLibrary
 			catch (Exception e)
 			{
 				Close();
-				ModContent.GetInstance<SubworldLibrary>().Logger.Warn(Main.worldName + " - Exception occurred while waiting for pipeIN to connect " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Exception occurred while waiting for pipeIn to connect " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
 			}
 		}
 
@@ -106,7 +106,7 @@ namespace SubworldLibrary
 				_connectedOut = true;
 
 				if (_connectedIn)
-				{ 
+				{
 					_watchdog.Restart();
 				}
 
@@ -119,7 +119,7 @@ namespace SubworldLibrary
 			catch (Exception e)
 			{
 				Close();
-				ModContent.GetInstance<SubworldLibrary>().Logger.Warn(Main.worldName + " - Exception occurred while waiting for pipeOUT to connect " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Exception occurred while waiting for pipeOut to connect " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
 			}
 		}
 
@@ -143,7 +143,7 @@ namespace SubworldLibrary
 			catch (Exception e)
 			{
 				Close();
-				ModContent.GetInstance<SubworldLibrary>().Logger.Warn(Main.worldName + " - Exception occurred while writing data to pipe " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Exception occurred while writing data pipeIn to " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
 			}
 		}
 
@@ -175,7 +175,7 @@ namespace SubworldLibrary
 			catch (Exception e)
 			{
 				Close();
-				ModContent.GetInstance<SubworldLibrary>().Logger.Warn(Main.worldName + " - Exception occurred while writing queue " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Exception occurred while writing queue pipeIn to " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
 			}
 		}
 
@@ -200,7 +200,7 @@ namespace SubworldLibrary
 						// The startup timer has been expired, terminate the subserver process.
 						if (!exited)
 						{ 
-							ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Subworld " + SubworldSystem.subworlds[_id].FullName + " took too long to start up! Try increasing timeout in server config");
+							ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Subworld " + SubworldSystem.subworlds[_id].FullName + " took too long to start up! Try increasing timeout in server config...");
 							_process.Kill();
 						}
 
@@ -210,7 +210,7 @@ namespace SubworldLibrary
 				catch (Exception e)
 				{
 					Close();
-					ModContent.GetInstance<SubworldLibrary>().Logger.Warn(Main.worldName + " - Exception occurred handling process " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
+					ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Exception occurred handling process " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
 				}
 
 				return;
@@ -282,35 +282,40 @@ namespace SubworldLibrary
 
 		public void Refresh(int joinTime = int.MinValue, int keepOpenTime = int.MinValue)
 		{
-			if (!Disconnecting)
+			if (Disconnecting)
 			{
-				// Apply the new given joinTime
-				if (joinTime != int.MinValue)
-				{ 
-					_joinTime = joinTime;
-				}
-
-				// Apply the new given keepOpenTime
-				if (keepOpenTime != int.MinValue)
-				{ 
-					_keepOpenTime = keepOpenTime;
-				}
-
-				_watchdog?.Restart();
+				return;
 			}
+
+			// Apply the new given joinTime
+			if (joinTime != int.MinValue)
+			{
+				_joinTime = joinTime;
+			}
+
+			// Apply the new given keepOpenTime
+			if (keepOpenTime != int.MinValue)
+			{
+				_keepOpenTime = keepOpenTime;
+			}
+
+			_watchdog?.Restart();
 		}
 
-		public void Disconnect()
+		public void Disconnect(bool closing = false)
 		{
 			// Only when not already disconnecting
 			if (Disconnecting)
 			{
 				return;
 			}
-			
-			// Set Disconnect and restart timer
-			Disconnecting = true;
-			_watchdog?.Restart();
+
+			// When closing set Disconnection early, this prevents
+			// packets being sent on a possibly broken/closed pipe
+			if (closing)
+			{
+				Disconnecting = true;
+			}
 
 			// Move all players that are still 'connected' to the closed subserver back to the main server
 			for (int i = 0; i < Netplay.Clients.Length; i++)
@@ -322,12 +327,19 @@ namespace SubworldLibrary
 					SubworldSystem.MovePlayerToSubserver(i, ushort.MaxValue);
 				}
 			}
+
+			// Send disconnect request packet
+			Send(SubworldSystem.GetStopSubserverPacket(_id));
+
+			// Set Disconnect and restart timer
+			Disconnecting = true;
+			_watchdog?.Restart();
 		}
 
 		private void Close()
 		{
 			// Set disconnection status
-			Disconnect();
+			Disconnect(true);
 
 			// Close pipes and clear objects
 			_pipeIn?.Close();
@@ -380,7 +392,7 @@ namespace SubworldLibrary
 									}
 									catch (Exception e) 
 									{
-										ModContent.GetInstance<SubworldLibrary>().Logger.Warn(Main.worldName + " - Exception occurred client AsyncSend " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
+										ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Exception occurred client AsyncSend " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
 									}
 								}
 							}
@@ -430,7 +442,7 @@ namespace SubworldLibrary
 			}
 			catch (Exception e)
 			{
-				ModContent.GetInstance<SubworldLibrary>().Logger.Warn(Main.worldName + " - Exception occurred while reading data from pipe " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
+				ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Exception occurred while reading data pipeOut from " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
 			}
 			finally
 			{
