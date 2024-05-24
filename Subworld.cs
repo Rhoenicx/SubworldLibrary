@@ -1,11 +1,13 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using ReLogic.Graphics;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using Terraria;
 using Terraria.GameContent;
 using Terraria.GameInput;
+using Terraria.ID;
 using Terraria.IO;
 using Terraria.Localization;
 using Terraria.ModLoader;
@@ -179,6 +181,7 @@ namespace SubworldLibrary
 			Main.spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, Main.Rasterizer, null, Main.UIScaleMatrix);
 
 			DrawMenu(gameTime);
+			DrawReturnHint(gameTime);
 			Main.DrawCursor(Main.DrawThickCursor());
 
 			Main.spriteBatch.End();
@@ -191,6 +194,52 @@ namespace SubworldLibrary
 		{
 			Main.spriteBatch.DrawString(FontAssets.DeathText.Value, Main.statusText, new Vector2(Main.screenWidth, Main.screenHeight) / 2 - FontAssets.DeathText.Value.MeasureString(Main.statusText) / 2, Color.White);
 		}
+
+		public virtual void DrawReturnHint(GameTime gameTime)
+		{
+			float scale = 0.5f;
+			string text = "Escape: " + Language.GetTextValue("Mods.SubworldLibrary.Return");
+			Vector2 textSize = FontAssets.DeathText.Value.MeasureString(text) * scale;
+
+			float progress = Math.Min(SubworldSystem.InventoryKeyHoldTime.ElapsedMilliseconds / 1000f, 1f);
+			float blink = (float)Math.Sin(SubworldSystem.InventoryKeyHoldTime.ElapsedMilliseconds * 0.01f);
+			Color color = progress < 1f ? new(1f - progress, 1f - progress, 1f) : new(blink, blink, 1f);
+			int barSize = (int)(textSize.X * progress);
+
+			Main.spriteBatch.Draw(
+				TextureAssets.MagicPixel.Value,
+				new Vector2(Main.screenWidth * 0.5f, Main.screenHeight - textSize.Y / 2),
+				new Rectangle(0, 0, barSize, (int)(textSize.Y / 2)),
+				color,
+				0f,
+				Vector2.Zero,
+				1f,
+				SpriteEffects.None,
+				0);
+
+			Main.spriteBatch.Draw(
+				TextureAssets.MagicPixel.Value,
+				new Vector2(Main.screenWidth * 0.5f - barSize, Main.screenHeight - textSize.Y / 2),
+				new Rectangle(0, 0, barSize, (int)(textSize.Y / 2)),
+				color,
+				0f,
+				Vector2.Zero,
+				1f,
+				SpriteEffects.None,
+				0);
+
+			Main.spriteBatch.DrawString(
+				FontAssets.DeathText.Value,
+				text, 
+				new Vector2(Main.screenWidth * 0.5f - textSize.X * 0.5f, Main.screenHeight - textSize.Y * 1.5f), 
+				Color.White,
+				0f,
+				Vector2.Zero,
+				scale,
+				SpriteEffects.None,
+				0);
+		}
+
 		/// <summary>
 		/// Called before music is chosen, including in the loading menu.
 		/// <br/>Return true to disable vanilla behaviour, allowing for modification of variables such as <see cref="Main.newMusic"/>.

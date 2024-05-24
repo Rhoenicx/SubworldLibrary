@@ -1,6 +1,7 @@
 using Microsoft.Xna.Framework;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Net;
@@ -14,6 +15,7 @@ using Terraria.GameContent.Bestiary;
 using Terraria.GameContent.Creative;
 using Terraria.GameContent.Events;
 using Terraria.GameContent.UI.Chat;
+using Terraria.GameInput;
 using Terraria.Graphics.Capture;
 using Terraria.ID;
 using Terraria.IO;
@@ -75,8 +77,13 @@ namespace SubworldLibrary
 
 		internal static ServerMessageBuffer serverMessageBuffer;
 
+		internal static bool InventoryKey;
+		internal static Stopwatch InventoryKeyHoldTime;
+
 		public override void OnModLoad()
 		{
+			InventoryKeyHoldTime ??= new();
+
 			if (Main.dedServ)
 			{
 				playerLocations = new Dictionary<ISocket, int>();
@@ -107,6 +114,38 @@ namespace SubworldLibrary
 			}
 
 			return false;
+		}
+
+		public override void PostUpdateInput()
+		{
+			// Detect when the Inventory button (ESC by default) is pressed.
+			if (PlayerInput.Triggers.Current.Inventory && !InventoryKey)
+			{
+				InventoryKeyHoldTime.Start();
+				InventoryKey = true;
+			}
+
+			// Detect when the Inventory button (ESC by default) is released.
+			if (!PlayerInput.Triggers.Current.Inventory && InventoryKey)
+			{
+				// When the button is held down for more than 1 second during a loading screen towards another world
+				if (InventoryKeyHoldTime.ElapsedMilliseconds > 1000 && Main.menuMode == 14)
+				{
+					if (Main.netMode == NetmodeID.MultiplayerClient && Netplay.Connection.State == 1 && current != null && ModContent.GetInstance<SubworldLibrary>().NetID >= 0)
+					{
+						BeginEntering(current.ReturnDestination);
+					}
+
+					else if (Netplay.Connection.Socket == null || (Netplay.Connection.Socket != null && !Netplay.Connection.Socket.IsConnected()) || Main.netMode != NetmodeID.MultiplayerClient || Netplay.Connection.State != 1)
+					{
+						BeginEntering(int.MinValue);
+					}
+				}
+
+				InventoryKeyHoldTime.Reset();
+				InventoryKeyHoldTime.Stop();
+				InventoryKey = false;
+			}
 		}
 
 		/// <summary>
