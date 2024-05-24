@@ -64,26 +64,6 @@ namespace SubworldLibrary
 					orig(messageAuthor, text, color, excludedPlayer);
 				};
 
-				IL_NetMessage.CheckBytes += il =>
-				{
-					ILCursor c;
-					if (!(c = new(il)).TryGotoNext(
-						x => x.MatchLdloc(3),
-						x => x.MatchLdcI4(0),
-						x => x.MatchBle(out _),
-						x => x.MatchLdsfld(typeof(ModNet), "DetailedLogging"),
-						x => x.MatchBrfalse(out _)))
-					{
-						Logger.Error("Failed to apply IL patch into: NetMessage.CheckBytes - PrepareMessageBuffer");
-						return;
-					}
-
-					c.Emit(Ldsfld, typeof(NetMessage).GetField("buffer"));
-					c.Emit(Ldarg_0);
-					c.Emit(Ldelem_Ref);
-					c.Emit(OpCodes.Call, typeof(SubworldLibrary).GetMethod("PrepareMessageBuffer", BindingFlags.NonPublic | BindingFlags.Static));
-				};
-
 				handleModPacketHook = new ILHook(typeof(ModNet).GetMethod("HandleModPacket", BindingFlags.Static | BindingFlags.NonPublic), HandleModPacket);
 
 				void HandleModPacket(ILContext il)
@@ -802,54 +782,6 @@ namespace SubworldLibrary
 			cacheMessage = null;
 		}
 
-		private static void PrepareMessageBuffer(MessageBuffer buffer)
-		{
-			try
-			{
-				int start = 0;
-				int totalData = buffer.totalData;
-				int writePosition = 0;
-				List<byte> bytes = new();
-
-				while (totalData >= 2)
-				{
-					int length = BitConverter.ToInt16(buffer.readBuffer, start);
-
-					if (totalData < length || length <= 0)
-					{
-						break;
-					}
-
-					if (buffer.readBuffer[start + 2] != 250
-							|| (ModNet.NetModCount < 256 && buffer.readBuffer[start + 3] != (byte)ModContent.GetInstance<SubworldLibrary>().NetID)
-							|| (ModNet.NetModCount >= 256 && BitConverter.ToUInt16(buffer.readBuffer, start + 3) != ModContent.GetInstance<SubworldLibrary>().NetID))
-					{
-						totalData -= length;
-						start += length;
-						continue;
-					}
-
-					for (int i = start; i < start + length; i++)
-					{
-						bytes.Add(buffer.readBuffer[i]);
-					}
-
-					totalData -= length;
-					Buffer.BlockCopy(buffer.readBuffer, start + length, buffer.readBuffer, start, totalData);
-					writePosition = start + totalData;
-				}
-
-				for (int i = 0; i < bytes.Count; i++)
-				{
-					buffer.readBuffer[writePosition + i] = bytes[i];
-				}
-			}
-			catch (Exception e) 
-			{
-				ModContent.GetInstance<SubworldLibrary>().Logger.Error(Main.worldName + " - Exception occurred while preparing message buffers: " + e.Message);
-			}
-		}
-
 		private static bool DenyRead(MessageBuffer buffer, int start, int length)
 		{
 			RemoteClient client = Netplay.Clients[buffer.whoAmI];
@@ -880,16 +812,16 @@ namespace SubworldLibrary
 			// Verify if the client's location subworld is still active
 			if (!SubworldSystem.links.TryGetValue(id, out SubserverLink link))
 			{
-				// Somehow this client is/was connected to a closed subserver...
-				if (!Netplay.Disconnect)
+				// Try to force the client back to the main server
+				if (id >= 0 && id < SubworldSystem.subworlds.Count)
 				{
-					// Try to force the client back to the main server
-					SubworldSystem.MovePlayerToSubserver(buffer.whoAmI, ushort.MaxValue);
-				}
-				else
-				{
-					// Kick the client	
-					NetMessage.BootPlayer(buffer.whoAmI, Lang.mp[2].ToNetworkText());
+					// Get the location.
+					ushort location = SubworldSystem.subworlds[id].ReturnDestination <= -1 || SubworldSystem.subworlds[id].ReturnDestination >= ushort.MaxValue
+						? ushort.MaxValue 
+						: (ushort)SubworldSystem.subworlds[id].ReturnDestination;
+
+					// Move the player
+					SubworldSystem.MovePlayerToSubserver(buffer.whoAmI, location);
 				}
 
 				// Block the packet.
@@ -1011,37 +943,47 @@ namespace SubworldLibrary
 			Thread.Sleep((int)remaining);
 		}
 
-		// Replicated vanilla UpdateConnectedClients
-		private static void CheckClients()
+		internal static void CheckClients()
 		{
 			bool connection = false;
 			for (int i = 0; i < 255; i++)
 			{
 				RemoteClient client = Netplay.Clients[i];
+
+				// The client got kicked by the server's logic
 				if (client.PendingTermination)
 				{
 					if (client.PendingTerminationApproved)
 					{
+						// Boot the player if still connected
+						if (client.IsConnected() || client.IsActive)
+						{
+							SubworldSystem.BootPlayer(i);
+						}
+
+						// Reset the client and send disconnect.
 						client.Reset();
 						NetMessage.SyncDisconnectedPlayer(i);
 					}
+					continue;
 				}
+
+				// Client is connected like usual
 				else if (client.IsConnected())
 				{
-					if (!client.IsActive)
-					{
-						client.State = 0;
-						client.IsActive = true;
-					}
-
+					// Active connection found!
 					connection = true;
 				}
+
+				// Client is not connected, but still active => terminate
 				else if (client.IsActive)
 				{
 					MethodInfo setPendingTerminationMethod = typeof(RemoteClient).GetMethod("SetPendingTermination", BindingFlags.Instance | BindingFlags.NonPublic);
 					setPendingTerminationMethod.Invoke(client, new object[] { "Connection lost" });
 					client.PendingTerminationApproved = true;
 				}
+				
+				// Client is not connected and not active => clear player
 				else
 				{
 					bool active = Main.player[i].active;
@@ -1053,6 +995,7 @@ namespace SubworldLibrary
 				}
 			}
 
+			// Set HasClients to true to make the server update run.
 			Netplay.HasClients = connection;
 		}
 
@@ -1140,27 +1083,13 @@ namespace SubworldLibrary
 					}
 					break;
 
-
-				// Sent from main server => sub server
-				case SubLibMessageType.MovePlayerOnServer:
-					{
-						// Only process the action on sub servers
-						if (Main.netMode == NetmodeID.Server && SubworldSystem.AnyActive())
-						{
-							Netplay.Clients[whoAmI].Socket.Close();
-							CheckClients();
-						}
-					}
-					break;
-
-
 				// Sent from main server => client
 				case SubLibMessageType.MovePlayerOnClient: 
 					{
 						ushort id = reader.ReadUInt16();
 
 						if (Main.netMode == NetmodeID.MultiplayerClient)
-						{ 
+						{
 							Task.Factory.StartNew(SubworldSystem.ExitWorldCallBack, id < ushort.MaxValue ? id : -1);
 							
 							// Overwrite the statustext to display connection message during the loading screen

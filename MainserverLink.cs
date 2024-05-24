@@ -48,7 +48,7 @@ namespace SubworldLibrary
 		{
 			try
 			{
-				if (!Netplay.Disconnect && PipeOut.IsConnected && !Disconnecting)
+				if (!Netplay.Disconnect && PipeOut != null && PipeOut.IsConnected && !Disconnecting)
 				{
 					PipeOut.Write(data);
 				}
@@ -137,11 +137,42 @@ namespace SubworldLibrary
 							}
 							break;
 
+						case SubLibMessageType.MovePlayerOnServer:
+							{
+								// Disconnect request, This packet needs special handling on the subserver's side:
+								// =>	when packets are sent in this order: Hello => SubLib Exit => Hello
+								//		normal execution will mess up the Socket.
+
+								// Replicate vanilla call order for disconnect here:
+								int whoAmI = NetMessage.buffer[packetInfo[0]].whoAmI;
+
+								// Verify if the player is still connected on the subserver
+								if (!Netplay.Clients[whoAmI].IsConnected() && !Netplay.Clients[whoAmI].IsActive)
+								{
+									break;
+								}
+
+								// Log message
+								ModNet.Log(Netplay.Clients[whoAmI].Id, "Terminating: Connection lost");
+
+								// Reset the client when the packet comes in
+								Netplay.Clients[whoAmI].Reset();
+
+								// Run vanilla SyncDisconnect, this takes care of synchronizing
+								// the disconnect to other players and the chat/log messages.
+								NetMessage.SyncDisconnectedPlayer(whoAmI);
+
+								// Run CheckClients to update Netplay.HasClients
+								SubworldLibrary.CheckClients();
+							}
+							break;
+
 						default:
 							{
 								MessageBuffer buffer = NetMessage.buffer[packetInfo[0]];
 								lock (buffer)
 								{
+									// Wait for space in the readBuffer
 									while (buffer.totalData + length > buffer.readBuffer.Length)
 									{
 										Monitor.Exit(buffer);
@@ -149,15 +180,20 @@ namespace SubworldLibrary
 										Monitor.Enter(buffer);
 									}
 
-									if (!Netplay.Clients[buffer.whoAmI].IsActive && data[2] == MessageID.Hello)
-									{
-										if (!Netplay.Clients[buffer.whoAmI].IsConnected())
-										{
-											Netplay.Clients[buffer.whoAmI].Socket = new SubserverSocket(buffer.whoAmI);
-										}
+									// Packet is Hello, player is logging in to the server.
+									if (data[2] == MessageID.Hello)
+									{ 
+										// Overwrite the Socket of this client
+										Netplay.Clients[buffer.whoAmI].Socket = new SubserverSocket(buffer.whoAmI);
+
+										// Put the client Active
 										Netplay.Clients[buffer.whoAmI].IsActive = true;
+
+										// Run CheckClients to update Netplay.HasClients
+										SubworldLibrary.CheckClients();
 									}
 
+									// Put the data inside the buffer of this client.
 									if (Netplay.Clients[buffer.whoAmI].IsConnected())
 									{
 										Buffer.BlockCopy(data, 0, buffer.readBuffer, buffer.totalData, length);

@@ -98,6 +98,17 @@ namespace SubworldLibrary
 			Netplay.OnDisconnect -= OnDisconnect;
 		}
 
+		public override bool HijackSendData(int whoAmI, int msgType, int remoteClient, int ignoreClient, NetworkText text, int number, float number2, float number3, float number4, int number5, int number6,int number7)
+		{
+			if (AnyActive() && msgType == MessageID.Kick && current.ReturnDestination != int.MinValue)
+			{
+				BootPlayer(remoteClient);
+				return true;
+			}
+
+			return false;
+		}
+
 		/// <summary>
 		/// Hides the Return button.
 		/// <br/>Its value is reset before <see cref="Subworld.OnEnter"/> is called, and after <see cref="Subworld.OnExit"/> is called.
@@ -492,6 +503,40 @@ namespace SubworldLibrary
 			{			
 				playerLocations.Remove(Netplay.Clients[player].Socket);
 			}
+		}
+
+		internal static void BootPlayer(int player)
+		{
+			// Check for invalid inputs
+			if (!AnyActive() || Main.netMode != NetmodeID.Server || player < 0 || player > byte.MaxValue)
+			{
+				return;
+			}
+
+			int netId = ModContent.GetInstance<SubworldLibrary>().NetID;
+
+			// Boot the client back to the return destination.
+			// By default select the main server
+			ushort id = ushort.MaxValue;
+
+			// Return destination set, overwrite the id. Booting to main menu is not supported from server.
+			if (current.ReturnDestination >= 0 && current.ReturnDestination < ushort.MaxValue)
+			{
+				id = (ushort)current.ReturnDestination;
+			}
+
+			// Create the return packet
+			byte[] data;
+			if (ModNet.NetModCount < 256)
+			{
+				data = new byte[8] { (byte)player, 7, 0, 250, (byte)netId, (byte)SubLibMessageType.BeginEntering, (byte)id, (byte)(id >> 8) };
+			}
+			else
+			{
+				data = new byte[9] { (byte)player, 8, 0, 250, (byte)netId, (byte)(netId >> 8), (byte)SubLibMessageType.BeginEntering, (byte)id, (byte)(id >> 8) };
+			}
+
+			MainserverLink.Send(data);
 		}
 
 		/// <summary>

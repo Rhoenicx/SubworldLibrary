@@ -384,7 +384,7 @@ namespace SubworldLibrary
 						case SubLibMessageType.Broadcast:
 							{
 								RemoteClient client = Netplay.Clients[packetInfo[0]];
-								if (client.IsConnected() && SubworldSystem.playerLocations[client.Socket] == _id && client.State == 10)
+								if (client.IsConnected() && SubworldSystem.playerLocations.TryGetValue(client.Socket, out int id) && id == _id)
 								{
 									try 
 									{ 
