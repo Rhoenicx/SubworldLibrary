@@ -139,10 +139,6 @@ namespace SubworldLibrary
 
 						case SubLibMessageType.MovePlayerOnServer:
 							{
-								// Disconnect request, This packet needs special handling on the subserver's side:
-								// =>	when packets are sent in this order: Hello => SubLib Exit => Hello
-								//		normal execution will mess up the Socket.
-
 								// Replicate vanilla call order for disconnect here:
 								int whoAmI = NetMessage.buffer[packetInfo[0]].whoAmI;
 
@@ -182,7 +178,7 @@ namespace SubworldLibrary
 
 									// Packet is Hello, player is logging in to the server.
 									if (data[2] == MessageID.Hello)
-									{ 
+									{
 										// Overwrite the Socket of this client
 										Netplay.Clients[buffer.whoAmI].Socket = new SubserverSocket(buffer.whoAmI);
 

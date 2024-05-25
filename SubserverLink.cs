@@ -149,11 +149,35 @@ namespace SubworldLibrary
 
 		private bool QueueData(byte[] data)
 		{
+			// Queue has been processed and is no longer in use
 			if (_queue == null)
 			{
 				return false;
 			}
 
+			// Determine if the packet belongs to sublib, if yes determine the messagetype.
+			bool subLibPacket = data[3] == MessageID.ModPacket && (ModNet.NetModCount < 256 ? data[4] : BitConverter.ToUInt16(data, 4)) == ModContent.GetInstance<SubworldLibrary>().NetID;
+			SubLibMessageType messageType = subLibPacket ? (SubLibMessageType)data[ModNet.NetModCount < 256 ? 5 : 6] : SubLibMessageType.None;
+
+			switch (messageType)
+			{
+				// Player disconnection request from a booting subserver.
+				// !!! This fixes a racing condition between MainserverLink and MessageBuffer.GetData !!!
+				case SubLibMessageType.MovePlayerOnServer:
+					{
+						// Remove all the pending packets from the queue
+						for (int i = _queue.Count - 1; i >= 0; i--)
+						{
+							if (_queue[i][0] == data[0])
+							{
+								_queue.RemoveAt(i);
+							}
+						}
+					}
+					return true;
+			}
+
+			// Add the packet to the queue like normal.
 			_queue.Add(data);
 			return true;
 		}
