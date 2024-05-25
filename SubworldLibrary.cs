@@ -1195,7 +1195,7 @@ namespace SubworldLibrary
 					{ 
 						ushort id = reader.ReadUInt16();
 
-						if (Main.netMode == NetmodeID.Server)
+						if (Main.netMode != NetmodeID.Server)
 						{
 							break;
 						}

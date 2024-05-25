@@ -617,7 +617,7 @@ namespace SubworldLibrary
 			}
 
 			// Main server requests to close the specified sub server
-			if (current == null)
+			if (!AnyActive())
 			{
 				if (links.ContainsKey(id))
 				{
