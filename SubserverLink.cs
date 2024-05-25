@@ -15,7 +15,8 @@ namespace SubworldLibrary
 		private readonly int _id;
 		private readonly NamedPipeServerStream _pipeIn;
 		private readonly NamedPipeServerStream _pipeOut;
-		private List<byte[]> _queue;
+		private List<byte[]> _clientQueue;
+		private List<byte[]> _serverQueue;
 		private Process _process;
 		private bool _connectedIn;
 		private bool _connectedOut;
@@ -29,7 +30,8 @@ namespace SubworldLibrary
 		{
 			_pipeIn = new NamedPipeServerStream(name + "_IN", PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
 			_pipeOut = new NamedPipeServerStream(name + "_OUT", PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
-			_queue = new List<byte[]>(16);
+			_clientQueue = new List<byte[]>(16);
+			_serverQueue = new List<byte[]>(4);
 			_id = id;
 			_joinTime = joinTime;
 			_keepOpenTime = keepOpenTime;
@@ -123,7 +125,7 @@ namespace SubworldLibrary
 			}
 		}
 
-		public void Send(byte[] data)
+		public void Send(byte[] data, bool server = false)
 		{
 			try
 			{
@@ -131,7 +133,7 @@ namespace SubworldLibrary
 				{
 					lock (this)
 					{
-						if (QueueData(data))
+						if (QueueData(data, server))
 						{
 							return;
 						}
@@ -147,38 +149,27 @@ namespace SubworldLibrary
 			}
 		}
 
-		private bool QueueData(byte[] data)
+		private bool QueueData(byte[] data, bool server)
 		{
-			// Queue has been processed and is no longer in use
-			if (_queue == null)
+			// Packet belongs to the server
+			if (server)
+			{
+				if (_serverQueue == null)
+				{
+					return false;
+				}
+
+				_serverQueue.Add(data);
+				return true;
+			}
+
+			// Packet belongs to a client
+			if (_clientQueue == null)
 			{
 				return false;
 			}
 
-			// Determine if the packet belongs to sublib, if yes determine the messagetype.
-			bool subLibPacket = data[3] == MessageID.ModPacket && (ModNet.NetModCount < 256 ? data[4] : BitConverter.ToUInt16(data, 4)) == ModContent.GetInstance<SubworldLibrary>().NetID;
-			SubLibMessageType messageType = subLibPacket ? (SubLibMessageType)data[ModNet.NetModCount < 256 ? 5 : 6] : SubLibMessageType.None;
-
-			switch (messageType)
-			{
-				// Player disconnection request from a booting subserver.
-				// !!! This fixes a racing condition between MainserverLink and MessageBuffer.GetData !!!
-				case SubLibMessageType.MovePlayerOnServer:
-					{
-						// Remove all the pending packets from the queue
-						for (int i = _queue.Count - 1; i >= 0; i--)
-						{
-							if (_queue[i][0] == data[0])
-							{
-								_queue.RemoveAt(i);
-							}
-						}
-					}
-					return true;
-			}
-
-			// Add the packet to the queue like normal.
-			_queue.Add(data);
+			_clientQueue.Add(data);
 			return true;
 		}
 
@@ -188,18 +179,46 @@ namespace SubworldLibrary
 			{
 				lock (this)
 				{
-					for (int i = 0; i < _queue.Count; i++)
+					// Process the server queue first
+					for (int i = 0; i < _serverQueue.Count; i++)
 					{
-						_pipeIn.Write(_queue[i]);
+						_pipeIn.Write(_serverQueue[i]);
 					}
+					_serverQueue = null;
 
-					_queue = null;
+					// Then process the client queue
+					for (int i = 0; i < _clientQueue.Count; i++)
+					{
+						_pipeIn.Write(_clientQueue[i]);
+					}
+					_clientQueue = null;
 				}
 			}
 			catch (Exception e)
 			{
 				Close();
 				ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Exception occurred while writing queue pipeIn to " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
+			}
+		}
+
+		internal void CancelMovePlayer(int player)
+		{
+			if (_clientQueue == null || player < 0 || player >= Main.maxPlayers)
+			{
+				return;
+			}
+
+			// Remove all the pending packets from the queue
+			for (int i = _clientQueue.Count - 1; i >= 0; i--)
+			{
+				// Verify the owner of the packet
+				if (_clientQueue[i][0] != (byte)player)
+				{
+					continue;
+				}
+
+				// Remove the packet
+				_clientQueue.RemoveAt(i);
 			}
 		}
 
@@ -353,7 +372,7 @@ namespace SubworldLibrary
 			}
 
 			// Send disconnect request packet
-			Send(SubworldSystem.GetStopSubserverPacket(_id));
+			Send(SubworldSystem.GetStopSubserverPacket(_id), true);
 
 			// Set Disconnect and restart timer
 			Disconnecting = true;
@@ -368,7 +387,8 @@ namespace SubworldLibrary
 			// Close pipes and clear objects
 			_pipeIn?.Close();
 			_pipeOut?.Close();
-			_queue = null;
+			_serverQueue = null;
+			_clientQueue = null;
 			_process = null;
 			_watchdog?.Stop();
 			_watchdog = null;

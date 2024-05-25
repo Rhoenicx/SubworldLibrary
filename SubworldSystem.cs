@@ -384,8 +384,8 @@ namespace SubworldLibrary
 
 		internal static void MovePlayerToSubserver(int player, ushort id)
 		{
-			// Verify given id, subworld exists or main server id
-			if (id >= subworlds.Count && id != ushort.MaxValue)
+			// Verify given inputs
+			if ((id >= subworlds.Count && id != ushort.MaxValue) || player < 0 || player > Main.maxPlayers)
 			{
 				return;
 			}
@@ -406,20 +406,30 @@ namespace SubworldLibrary
 
 			if (inSubworld)
 			{
-				// Send a client disconnect packet to the sub server which currently contains this client.
+				// Verify if the subserver is active
 				if (links.ContainsKey(location))
 				{
-					byte[] data; // Data consists of bytes: buffer index (client ID), length lower byte, length upper byte, vanilla messagetype, Mod net ID (as byte OR short), SubLibMessageType 
-					if (ModNet.NetModCount < 256)
+					// If the chosen subserver is currently booting up, remove all pending packets from this player
+					if (links[location].Connecting)
 					{
-						data = new byte[6] { (byte)player, 5, 0, 250, (byte)subLib.NetID, (byte)SubLibMessageType.MovePlayerOnServer };
-					}
-					else
-					{
-						data = new byte[7] { (byte)player, 7, 0, 250, (byte)subLib.NetID, (byte)(subLib.NetID >> 8), (byte)SubLibMessageType.MovePlayerOnServer };
+						links[location].CancelMovePlayer(player);
 					}
 
-					links[location].Send(data);
+					// Send a client disconnect packet to the sub server which currently contains this client.
+					else
+					{
+						byte[] data; // Data consists of bytes: buffer index (client ID), length lower byte, length upper byte, vanilla messagetype, Mod net ID (as byte OR short), SubLibMessageType 
+						if (ModNet.NetModCount < 256)
+						{
+							data = new byte[6] { (byte)player, 5, 0, 250, (byte)subLib.NetID, (byte)SubLibMessageType.MovePlayerOnServer };
+						}
+						else
+						{
+							data = new byte[7] { (byte)player, 7, 0, 250, (byte)subLib.NetID, (byte)(subLib.NetID >> 8), (byte)SubLibMessageType.MovePlayerOnServer };
+						}
+
+						links[location].Send(data);
+					}
 				}
 
 				// The requested id is the main server,
@@ -587,7 +597,7 @@ namespace SubworldLibrary
 				Buffer.BlockCopy(stream.GetBuffer(), 0, data, 4, (int)stream.Length);
 
 				// CopiedData will always we the first packet that is send to a subworld.
-				links[id].Send(data);
+				links[id].Send(data, true);
 			}
 
 			copiedData = null;
@@ -743,7 +753,7 @@ namespace SubworldLibrary
 			int header = ModNet.NetModCount < 256 ? 7 : 9;
 			byte[] packet = GetPacketHeader(data.Length + header, mod.NetID, SubLibMessageType.SendToSubserver);
 			Buffer.BlockCopy(data, 0, packet, header, data.Length);
-			links[subserver].Send(packet);
+			links[subserver].Send(packet, true);
 		}
 
 		/// <summary>
@@ -762,7 +772,7 @@ namespace SubworldLibrary
 
 			foreach (SubserverLink link in links.Values)
 			{
-				link.Send(packet);
+				link.Send(packet, true);
 			}
 		}
 
@@ -784,7 +794,7 @@ namespace SubworldLibrary
 			{
 				if (subworlds[pair.Key].Mod == mod)
 				{
-					pair.Value.Send(packet);
+					pair.Value.Send(packet, true);
 				}
 			}
 		}
@@ -1687,7 +1697,7 @@ namespace SubworldLibrary
 			BinaryWriter writer = new(stream);
 
 			// Send the packet
-			writer.Write((byte)0);
+			writer.Write(messageAuthor);
 			writer.Write((ushort)0);
 			writer.Write((byte)250);
 			writer.Write((byte)netId);
@@ -1721,7 +1731,7 @@ namespace SubworldLibrary
 					// NOTE: Also send to servers that are still Connecting! (Will be queued)
 					if (links[i] != null && i != worldID)
 					{
-						links[i].Send(packet);
+						links[i].Send(packet, messageAuthor == byte.MaxValue);
 					}
 				}
 			}
