@@ -139,7 +139,7 @@ namespace SubworldLibrary
 						}
 					}
 
-					_pipeIn.Write(data);
+					_pipeIn.WriteAsync(data);
 				}
 			}
 			catch (Exception e)
@@ -363,8 +363,8 @@ namespace SubworldLibrary
 			// Move all players that are still 'connected' to the closed subserver back to the main server
 			for (int i = 0; i < Netplay.Clients.Length; i++)
 			{
-				if (Netplay.Clients[i].State != 0
-					&& Netplay.Clients[i].Socket != null
+				if (Netplay.Clients[i].IsActive
+					&& Netplay.Clients[i].IsConnected()
 					&& SubworldSystem.playerLocations.TryGetValue(Netplay.Clients[i].Socket, out int id) && _id == id)
 				{
 					SubworldSystem.MovePlayerToSubserver(i, ushort.MaxValue);
@@ -401,7 +401,7 @@ namespace SubworldLibrary
 		{
 			try
 			{
-				while (!Netplay.Disconnect && SubworldSystem.links.ContainsKey(_id) && !Disconnecting)
+				while (!Netplay.Disconnect && SubworldSystem.links.ContainsKey(_id) && !Disconnecting && !Connecting)
 				{
 					byte[] packetInfo = new byte[3];
 					if (_pipeOut.Read(packetInfo) < 3)
@@ -430,9 +430,9 @@ namespace SubworldLibrary
 								RemoteClient client = Netplay.Clients[packetInfo[0]];
 								if (client.IsConnected() && SubworldSystem.playerLocations.TryGetValue(client.Socket, out int id) && id == _id)
 								{
-									try 
-									{ 
-										client.Socket.AsyncSend(data, 0, length, (state) => { }); 
+									try
+									{
+										client.Socket.AsyncSend(data, 0, length, (state) => { });
 									}
 									catch (Exception e)
 									{
@@ -486,11 +486,12 @@ namespace SubworldLibrary
 			}
 			catch (Exception e)
 			{
+				Close();
 				ModContent.GetInstance<SubworldLibrary>().Logger.Warn("Exception occurred while reading data pipeOut from " + SubworldSystem.subworlds[_id].FullName + ": " + e.Message);
 			}
 			finally
 			{
-				Close();
+				Disconnect();
 			}
 		}
 	}
