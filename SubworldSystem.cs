@@ -131,13 +131,15 @@ namespace SubworldLibrary
 				// When the button is held down for more than 1 second during a loading screen towards another world
 				if (InventoryKeyHoldTime.ElapsedMilliseconds > 1000 && Main.menuMode == 14)
 				{
-					if (Main.netMode == NetmodeID.MultiplayerClient && Netplay.Connection.State == 1 && current != null && ModContent.GetInstance<SubworldLibrary>().NetID >= 0)
+					// Client is connected to the main server and has a state higher than 0
+					if (Main.netMode == NetmodeID.MultiplayerClient && Netplay.Connection.State > 0 && current != null && Netplay.Connection.Socket.IsConnected())
 					{
+						// Go back to the returnDestination
 						BeginEntering(current.ReturnDestination);
 					}
-
-					else if (Netplay.Connection.Socket == null || (Netplay.Connection.Socket != null && !Netplay.Connection.Socket.IsConnected()) || Main.netMode != NetmodeID.MultiplayerClient || Netplay.Connection.State != 1)
+					else
 					{
+						// Otherwise go back to the main menu (when disconnected from server)
 						BeginEntering(int.MinValue);
 					}
 				}
