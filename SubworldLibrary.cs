@@ -830,8 +830,8 @@ namespace SubworldLibrary
 
 			// The subserver link is still starting up and/or processing its queue,
 			// while this client is trying to connect to the subserver.
-			// Only accept Hello messages into the queue; block everything else.
-			if (link.Connecting && messageType != MessageID.Hello)
+			// Only accept login messages into the queue; block everything else.
+			if (link.Connecting && DenyPacket(1, messageType))
 			{
 				return true;
 			}
@@ -901,8 +901,14 @@ namespace SubworldLibrary
 			{
 				return false;
 			}
-			
+
 			// => Client is currently inside a subworld, only allow specific packets to be send to the client!
+
+			// Let kick messages from main server go through to the client
+			if (data[start + 2] == MessageID.Kick)
+			{
+				return false;
+			}
 
 			// Determine if the current packet belongs to Subworld Library's ModNet
 			if (data[start + 2] == MessageID.ModPacket && (ModNet.NetModCount < 256 ? data[start + 3] : BitConverter.ToUInt16(data, start + 3)) == ModContent.GetInstance<SubworldLibrary>().NetID)
@@ -971,6 +977,11 @@ namespace SubworldLibrary
 				// Client is connected like usual
 				else if (client.IsConnected())
 				{
+					if (!client.IsActive)
+					{
+						client.IsActive = true;
+					}
+
 					// Active connection found!
 					connection = true;
 				}
@@ -1091,7 +1102,8 @@ namespace SubworldLibrary
 						if (Main.netMode == NetmodeID.MultiplayerClient)
 						{
 							Task.Factory.StartNew(SubworldSystem.ExitWorldCallBack, id < ushort.MaxValue ? id : -1);
-							
+							Netplay.Connection.State = 1;
+
 							// Overwrite the statustext to display connection message during the loading screen
 							if (id < SubworldSystem.subworlds.Count)
 							{

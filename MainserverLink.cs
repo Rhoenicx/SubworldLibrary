@@ -177,13 +177,17 @@ namespace SubworldLibrary
 									}
 
 									// Packet is Hello, player is logging in to the server.
-									if (data[2] == MessageID.Hello)
+									if (!Netplay.Clients[buffer.whoAmI].IsConnected())
 									{
 										// Overwrite the Socket of this client
 										Netplay.Clients[buffer.whoAmI].Socket = new SubserverSocket(buffer.whoAmI);
 
 										// Put the client Active
 										Netplay.Clients[buffer.whoAmI].IsActive = true;
+
+										// Set state to 1, we expect to receive SyncPlayer somewhere during
+										// the first time this client joins this subserver
+										Netplay.Clients[buffer.whoAmI].State = 1;
 
 										// Run CheckClients to update Netplay.HasClients
 										SubworldLibrary.CheckClients();

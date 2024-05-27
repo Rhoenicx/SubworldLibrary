@@ -439,7 +439,7 @@ namespace SubworldLibrary
 				if (id == ushort.MaxValue)
 				{
 					playerLocations[client.Socket] = -1;
-					client.State = 0;
+					client.State = 1;
 					client.ResetSections();
 
 					// Send a leave packet to the client
@@ -447,6 +447,9 @@ namespace SubworldLibrary
 					leavePacket.Write((byte)SubLibMessageType.MovePlayerOnClient);
 					leavePacket.Write(id);
 					leavePacket.Send(player);
+
+					// Send playerInfo request packet
+					NetMessage.SendData(MessageID.PlayerInfo, player);
 
 					return;
 				}
@@ -465,6 +468,9 @@ namespace SubworldLibrary
 			enterPacket.Write((byte)SubLibMessageType.MovePlayerOnClient);
 			enterPacket.Write(id);
 			enterPacket.Send(player);
+
+			// Send playerInfo request packet
+			NetMessage.SendData(MessageID.PlayerInfo, player);
 
 			// The client moved from main server to a sub server, 
 			// de-activate the player on the main world.
@@ -1296,11 +1302,6 @@ namespace SubworldLibrary
 			if (netMode != NetmodeID.MultiplayerClient)
 			{
 				LoadWorld();
-			}
-			else
-			{
-				NetMessage.SendData(MessageID.Hello);
-				Main.autoPass = true;
 			}
 		}
 
