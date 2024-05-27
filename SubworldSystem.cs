@@ -132,7 +132,7 @@ namespace SubworldLibrary
 				if (InventoryKeyHoldTime.ElapsedMilliseconds > 1000 && Main.menuMode == 14)
 				{
 					// Client is connected to the main server and has a state higher than 0
-					if (Main.netMode == NetmodeID.MultiplayerClient && Netplay.Connection.State > 0 && current != null && Netplay.Connection.Socket.IsConnected())
+					if (Main.netMode == NetmodeID.MultiplayerClient && Netplay.Connection.State > 0 && Netplay.Connection.Socket.IsConnected())
 					{
 						// Go back to the returnDestination
 						BeginEntering(current.ReturnDestination);
