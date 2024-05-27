@@ -1101,8 +1101,8 @@ namespace SubworldLibrary
 
 						if (Main.netMode == NetmodeID.MultiplayerClient)
 						{
-							Task.Factory.StartNew(SubworldSystem.ExitWorldCallBack, id < ushort.MaxValue ? id : -1);
 							Netplay.Connection.State = 1;
+							Task.Factory.StartNew(SubworldSystem.ExitWorldCallBack, id < ushort.MaxValue ? id : -1);
 
 							// Overwrite the statustext to display connection message during the loading screen
 							if (id < SubworldSystem.subworlds.Count)

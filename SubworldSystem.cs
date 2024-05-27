@@ -448,9 +448,6 @@ namespace SubworldLibrary
 					leavePacket.Write(id);
 					leavePacket.Send(player);
 
-					// Send playerInfo request packet
-					NetMessage.SendData(MessageID.PlayerInfo, player);
-
 					return;
 				}
 			}
@@ -468,9 +465,6 @@ namespace SubworldLibrary
 			enterPacket.Write((byte)SubLibMessageType.MovePlayerOnClient);
 			enterPacket.Write(id);
 			enterPacket.Send(player);
-
-			// Send playerInfo request packet
-			NetMessage.SendData(MessageID.PlayerInfo, player);
 
 			// The client moved from main server to a sub server, 
 			// de-activate the player on the main world.
@@ -1302,6 +1296,12 @@ namespace SubworldLibrary
 			if (netMode != NetmodeID.MultiplayerClient)
 			{
 				LoadWorld();
+			}
+			else
+			{
+				// Send-to-self packet 3
+				byte[] data = new byte[5] { 5, 0, MessageID.PlayerInfo, (byte)Main.myPlayer, 0 };
+				NetMessage.ReceiveBytes(data, data.Length);
 			}
 		}
 
