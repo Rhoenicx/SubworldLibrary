@@ -986,11 +986,11 @@ namespace SubworldLibrary
 						SubworldSystem.Exit();
 						return true;
 					case "Current":
-						return SubworldSystem.Current.FullName;
+						return SubworldSystem.Current != null ? SubworldSystem.Current.FullName : "";
 					case "IsActive":
 						return SubworldSystem.IsActive(args[1] as string);
 					case "AnyActive":
-						return SubworldSystem.AnyActive(args[1] as Mod);
+						return args.Length > 1 ? SubworldSystem.AnyActive(args[1] as Mod) : SubworldSystem.AnyActive();
 				}
 			}
 			catch (Exception e)
