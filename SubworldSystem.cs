@@ -517,9 +517,16 @@ namespace SubworldLibrary
 			{
 				return;
 			}
-
+			
 			subworld.link.Close();
 			subworld.link = null;
+
+   			// Do not send the exit packet when the main server closes (host leaves).
+      			// Prevents clients getting stuck on a loading screen.
+			if (Netplay.Disconnect)
+   			{
+      				return;
+			}
 
 			for (int i = 0; i < 256; i++)
 			{
