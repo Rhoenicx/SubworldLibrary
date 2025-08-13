@@ -6,5 +6,7 @@
     <GenerateDocumentationFile>True</GenerateDocumentationFile>
   </PropertyGroup>
   <ItemGroup>
+    <None Include="ModCallExample/**/*.cs" />
+    <Compile Remove="ModCallExample/**" />
   </ItemGroup>
 </Project>
