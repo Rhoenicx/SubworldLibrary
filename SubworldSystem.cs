@@ -43,10 +43,12 @@ namespace SubworldLibrary
 
 		void ISocket.AsyncSend(byte[] data, int offset, int size, SocketSendCallback callback, object state)
 		{
-			byte[] packet = new byte[size + 1];
-			packet[0] = (byte)id;
-			Buffer.BlockCopy(data, offset, packet, 1, size);
-			SubworldSystem.pipeOut.Write(packet);
+			lock (SubworldSystem.queue)
+			{
+				SubworldSystem.queue[SubworldSystem.totalData] = (byte)id;
+				Buffer.BlockCopy(data, offset, SubworldSystem.queue, SubworldSystem.totalData + 1, size);
+				SubworldSystem.totalData += size + 1;
+			}
 		}
 
 		void ISocket.Close() { }
@@ -82,6 +84,8 @@ namespace SubworldLibrary
 
 		internal static NamedPipeClientStream pipeIn;
 		internal static NamedPipeClientStream pipeOut;
+		internal static byte[] queue;
+		internal static int totalData;
 
 		public override void OnModLoad()
 		{
@@ -95,6 +99,7 @@ namespace SubworldLibrary
 
 			deniedSockets = new HashSet<ISocket>();
 
+			WorldFile.OnWorldLoad += ReadCachedData;
 			Player.Hooks.OnEnterWorld += OnEnterWorld;
 			Netplay.OnDisconnect += OnDisconnect;
 
@@ -103,8 +108,59 @@ namespace SubworldLibrary
 
 		public override void Unload()
 		{
+			WorldFile.OnWorldLoad -= ReadCachedData;
 			Player.Hooks.OnEnterWorld -= OnEnterWorld;
 			Netplay.OnDisconnect -= OnDisconnect;
+		}
+
+		private static void ReadCachedData()
+		{
+			if (copiedData == null || current != null || cache != null)
+			{
+				return;
+			}
+
+			ReadCopiedMainWorldData();
+		}
+
+		private static void OnEnterWorld(Player player)
+		{
+			if (Main.netMode == 1)
+			{
+				cache?.OnUnload();
+				current?.OnLoad();
+			}
+			cache = current;
+		}
+
+		private static void OnDisconnect()
+		{
+			if (current != null || cache != null)
+			{
+				Main.menuMode = 14;
+			}
+			current = null;
+			cache = null;
+		}
+
+		public override void SaveWorldData(TagCompound tag)
+		{
+			// cached world data is saved in ExitWorldCallBack
+		}
+
+		public override void LoadWorldData(TagCompound tag)
+		{
+			if (!tag.TryGet("mod", out string mod) || !tag.TryGet("name", out string name) || !tag.TryGet("data", out TagCompound data))
+			{
+				return;
+			}
+
+			if (!ModContent.TryFind(mod, name, out Subworld subworld))
+			{
+				return;
+			}
+
+			copiedData = data;
 		}
 
 		/// <summary>
@@ -212,6 +268,7 @@ namespace SubworldLibrary
 			if (index == int.MinValue)
 			{
 				current = null;
+				Main.menuMode = 10;
 				Main.gameMenu = true;
 
 				Task.Factory.StartNew(ExitWorldCallBack, null);
@@ -226,6 +283,7 @@ namespace SubworldLibrary
 				}
 
 				current = index < 0 ? null : subworlds[index];
+				Main.menuMode = 10;
 				Main.gameMenu = true;
 
 				Task.Factory.StartNew(ExitWorldCallBack, index);
@@ -399,12 +457,6 @@ namespace SubworldLibrary
 			}
 
 			deniedSockets.Remove(Netplay.Clients[player].Socket);
-
-			if (player == suppressAutoShutdown)
-			{
-				suppressAutoShutdown = -1;
-				Main.autoShutdown = true;
-			}
 		}
 
 		private static byte[] GetDisconnectPacket(int player, int id)
@@ -460,13 +512,13 @@ namespace SubworldLibrary
 			{
 				args += " -steamworkshopfolder \"" + steamworkshopfolder + "\"";
 			}
+			if (Program.LaunchParameters.TryGetValue("-tmlsavedirectory", out string tmlsavedirectory))
+			{
+				args += " -tmlsavedirectory \"" + tmlsavedirectory + "\"";
+			}
 			if (Program.LaunchParameters.TryGetValue("-savedirectory", out string savedirectory))
 			{
 				args += " -savedirectory \"" + savedirectory + "\"";
-			}
-			if (Program.LaunchParameters.TryGetValue("-savedirectory", out string tmlsavedirectory))
-			{
-				args += " -tmlsavedirectory \"" + tmlsavedirectory + "\"";
 			}
 			if (Program.LaunchParameters.TryGetValue("-config", out string config))
 			{
@@ -485,17 +537,14 @@ namespace SubworldLibrary
 			p.StartInfo.FileName = Process.GetCurrentProcess().MainModule!.FileName;
 			p.StartInfo.Arguments = args;
 			p.StartInfo.UseShellExecute = true;
+			p.EnableRaisingEvents = true;
+			p.Exited += (_, _) => { StopSubserver(id); }; // ensures the main server recognizes a subserver as stopped even if it crashes before the pipes can connect
 			p.Start();
 
 			copiedData = new TagCompound();
 			CopyMainWorldData();
 
-			using (MemoryStream stream = new MemoryStream())
-			{
-				TagIO.ToStream(copiedData, stream);
-				subworld.link = new SubserverLink(name, stream.ToArray());
-			}
-
+			subworld.link = new SubserverLink(name, copiedData);
 			copiedData = null;
 
 			new Thread(subworld.link.ConnectAndRead)
@@ -504,7 +553,11 @@ namespace SubworldLibrary
 				IsBackground = true
 			}.Start(id);
 
-			Task.Run(subworld.link.ConnectAndSend);
+			new Thread(subworld.link.ConnectAndSend)
+			{
+				Name = "Subserver Relay",
+				IsBackground = true
+			}.Start(id);
 		}
 
 		/// <summary>
@@ -647,7 +700,11 @@ namespace SubworldLibrary
 			int header = ModNet.NetModCount < 256 ? 5 : 6;
 			byte[] packet = GetPacketHeader(data.Length + header, mod.NetID);
 			Buffer.BlockCopy(data, 0, packet, header, data.Length);
-			pipeOut.Write(packet);
+			lock (queue)
+			{
+				Buffer.BlockCopy(packet, 0, queue, totalData, packet.Length);
+				totalData += packet.Length;
+			}
 		}
 
 		/// <summary>
@@ -951,31 +1008,95 @@ namespace SubworldLibrary
 			DD2Event.DownedInvasionT3 = copiedData.Get<bool>(nameof(DD2Event.DownedInvasionT3));
 		}
 
+		private static void CacheWorldData()
+		{
+			SubworldSystem system = ModContent.GetInstance<SubworldSystem>();
+
+			string path = Path.ChangeExtension(main.Path, ".twld");
+			bool isCloudSave = main.IsCloudSave;
+
+			if (FileUtilities.Exists(path, isCloudSave))
+			{
+				FileUtilities.Copy(path, path + ".bak", isCloudSave);
+			}
+
+			byte[] file = FileUtilities.ReadAllBytes(path, isCloudSave);
+			TagCompound tagCompound = TagIO.FromStream(new MemoryStream(file));
+
+			IList<TagCompound> list = tagCompound.GetList<TagCompound>("modData");
+
+			TagCompound data = new TagCompound
+			{
+				["mod"] = system.Mod.Name,
+				["name"] = system.Name,
+				["data"] = new TagCompound
+				{
+					["mod"] = cache.Mod.Name,
+					["name"] = cache.Name,
+					["data"] = copiedData
+				}
+			};
+
+			bool addTag = true;
+			for (int i = 0; i < list.Count; i++)
+			{
+				if (list[i].GetString("mod") == system.Mod.Name && list[i].GetString("name") == system.Name)
+				{
+					list[i] = data;
+					addTag = false;
+					break;
+				}
+			}
+			if (addTag)
+			{
+				list.Add(data);
+			}
+
+			using Stream stream = isCloudSave ? new MemoryStream() : new FileStream(path, FileMode.Create);
+			TagIO.ToStream(tagCompound, stream);
+			if (isCloudSave && SocialAPI.Cloud != null)
+			{
+				SocialAPI.Cloud.Write(path, ((MemoryStream)stream).ToArray());
+			}
+
+			copiedData = null;
+		}
+
 		private static void CheckBytes()
 		{
-			if (!NetMessage.buffer[256].checkBytes)
+			MessageBuffer buffer = NetMessage.buffer[256];
+			if (!buffer.checkBytes)
 			{
 				return;
 			}
 
-			lock (NetMessage.buffer[256])
+			lock (buffer)
 			{
 				int pos = 0;
-				int len = NetMessage.buffer[256].totalData;
+				int len = buffer.totalData;
 
 				while (len >= 2)
 				{
-					int packetLen = BitConverter.ToUInt16(NetMessage.buffer[256].readBuffer, pos);
+					int packetLen = BitConverter.ToUInt16(buffer.readBuffer, pos);
+
+					// bad packet, skip all remaining data
+					if (packetLen < 2)
+					{
+						len = 0;
+						buffer.totalData = 0;
+						break;
+					}
+
 					if (len < packetLen)
 					{
 						break;
 					}
 
-					BinaryReader reader = NetMessage.buffer[256].reader;
+					BinaryReader reader = buffer.reader;
 					if (reader == null)
 					{
-						NetMessage.buffer[256].ResetReader();
-						reader = NetMessage.buffer[256].reader;
+						buffer.ResetReader();
+						reader = buffer.reader;
 					}
 
 					long streamPos = reader.BaseStream.Position;
@@ -990,17 +1111,16 @@ namespace SubworldLibrary
 					pos += packetLen;
 				}
 
-				if (len != NetMessage.buffer[256].totalData)
+				if (len != buffer.totalData)
 				{
-					// this is what vanilla does, but BlockCopy may be faster
 					for (int i = 0; i < len; i++)
 					{
-						NetMessage.buffer[256].readBuffer[i] = NetMessage.buffer[256].readBuffer[i + pos];
+						buffer.readBuffer[i] = buffer.readBuffer[i + pos];
 					}
-					NetMessage.buffer[256].totalData = len;
+					buffer.totalData = len;
 				}
 
-				NetMessage.buffer[256].checkBytes = false;
+				buffer.checkBytes = false;
 			}
 		}
 
@@ -1021,6 +1141,8 @@ namespace SubworldLibrary
 					main = Main.ActiveWorldFileData;
 					current = subworlds[i];
 
+					queue = new byte[131070];
+
 					pipeIn = new NamedPipeClientStream(".", current.FileName + ".IN", PipeDirection.In);
 					pipeIn.Connect();
 
@@ -1031,13 +1153,14 @@ namespace SubworldLibrary
 					// replicates Netplay.InitializeServer, no need to set ReadBuffer because it's not used
 					for (int j = 0; j < 256; j++)
 					{
-						Netplay.Clients[j].Id = j;
-						Netplay.Clients[j].TileSections = new bool[Main.maxTilesX / 200 + 1, Main.maxTilesY / 150 + 1];
-						Netplay.Clients[j].Reset();
+						RemoteClient client = Netplay.Clients[j];
+						client.Id = j;
+						client.TileSections = new bool[Main.maxTilesX / 200 + 1, Main.maxTilesY / 150 + 1];
+						client.Reset();
 					}
 					SubserverSocket.address = new TcpAddress(IPAddress.Any, 0);
 
-					new Thread(SubserverLoop)
+					new Thread(SubserverReadLoop)
 					{
 						IsBackground = true
 					}.Start();
@@ -1050,6 +1173,11 @@ namespace SubworldLibrary
 					pipeOut = new NamedPipeClientStream(".", current.FileName + ".OUT", PipeDirection.Out);
 					pipeOut.Connect();
 
+					new Thread(SubserverSendLoop)
+					{
+						IsBackground = true
+					}.Start();
+
 					return;
 				}
 			}
@@ -1058,22 +1186,75 @@ namespace SubworldLibrary
 			Main.instance.Exit();
 		}
 
-		private static void SubserverLoop()
+		private static void SubserverSendLoop()
+		{
+			try
+			{
+				int sleep = 0;
+				while (pipeOut.IsConnected && !Netplay.Disconnect)
+				{
+					if (totalData <= 0)
+					{
+						// vanilla's server loop does this, not sure what the nuance here is
+						if (++sleep == 10)
+						{
+							Thread.Sleep(1);
+							sleep = 0;
+							continue;
+						}
+						Thread.Sleep(0);
+						continue;
+					}
+
+					byte[] data;
+					lock (queue)
+					{
+						data = new byte[totalData];
+						Buffer.BlockCopy(queue, 0, data, 0, totalData);
+						totalData = 0;
+					}
+					pipeOut.Write(data, 0, data.Length);
+				}
+			}
+			finally
+			{
+				Netplay.Disconnect = true;
+				pipeIn?.Close();
+				pipeOut?.Close();
+			}
+		}
+
+		private static void SubserverReadLoop()
 		{
 			try
 			{
 				while (pipeIn.IsConnected && !Netplay.Disconnect)
 				{
-					byte[] packetInfo = new byte[3];
-					if (pipeIn.Read(packetInfo) < 3)
+					// client (1 byte)
+					// length (2 bytes)
+					// packet type (1 byte)
+					byte[] packetInfo = new byte[4];
+					if (pipeIn.Read(packetInfo) < 4)
 					{
 						break;
 					}
 
 					suppressAutoShutdown = 0;
 
-					MessageBuffer buffer = NetMessage.buffer[packetInfo[0]];
-					int length = BitConverter.ToUInt16(packetInfo, 1);
+					MessageBuffer buffer;
+					if (packetInfo[0] == 255 && packetInfo[3] == 255)
+					{
+						// this packet actually came from the main server, put it in message buffer 256 for reading on the main thread
+						buffer = NetMessage.buffer[256];
+					}
+					else
+					{
+						buffer = NetMessage.buffer[packetInfo[0]];
+					}
+
+					byte low = packetInfo[1];
+					byte high = packetInfo[2];
+					int length = (high << 8) | low;
 
 					lock (buffer)
 					{
@@ -1084,24 +1265,12 @@ namespace SubworldLibrary
 							Monitor.Enter(buffer);
 						}
 
-						buffer.readBuffer[buffer.totalData] = packetInfo[1];
-						buffer.readBuffer[buffer.totalData + 1] = packetInfo[2];
-						pipeIn.Read(buffer.readBuffer, buffer.totalData + 2, length - 2);
+						buffer.readBuffer[buffer.totalData] = low;
+						buffer.readBuffer[buffer.totalData + 1] = high;
+						buffer.readBuffer[buffer.totalData + 2] = packetInfo[3];
+						pipeIn.Read(buffer.readBuffer, buffer.totalData + 3, length - 3);
 
-						if (packetInfo[0] == 255 && buffer.readBuffer[buffer.totalData + 2] == 255)
-						{
-							// this packet actually came from the main server, put it in message buffer 256 for reading on the main thread
-							MessageBuffer serverBuffer = NetMessage.buffer[256];
-							lock (serverBuffer)
-							{
-								Buffer.BlockCopy(buffer.readBuffer, buffer.totalData, serverBuffer.readBuffer, serverBuffer.totalData, length);
-								serverBuffer.totalData += length;
-								serverBuffer.checkBytes = true;
-							}
-							continue;
-						}
-
-						if (!Netplay.Clients[buffer.whoAmI].IsActive)
+						if (buffer.whoAmI < 256 && !Netplay.Clients[buffer.whoAmI].IsActive)
 						{
 							RemoteClient client = Netplay.Clients[buffer.whoAmI];
 							if (client.Socket == null)
@@ -1132,15 +1301,17 @@ namespace SubworldLibrary
 
 			while (true)
 			{
+				Thread.Sleep(1000);
 				if (suppressAutoShutdown == 0)
 				{
-					timer.Restart();
 					suppressAutoShutdown = -1;
+					timer.Restart();
 				}
 				else if (timer.ElapsedMilliseconds > 30000)
 				{
 					ModContent.GetInstance<SubworldLibrary>().Logger.Info("No packets received in 30 seconds, closing");
 					Netplay.Disconnect = true;
+					Main.instance.Exit();
 					return;
 				}
 			}
@@ -1151,29 +1322,29 @@ namespace SubworldLibrary
 			// presumably avoids a race condition?
 			int netMode = Main.netMode;
 
-			if (index != null)
+			if (netMode == 0)
 			{
-				if (netMode == 0)
+				WorldFile.CacheSaveTime();
+
+				if (copiedData == null)
 				{
-					WorldFile.CacheSaveTime();
-
-					if (copiedData == null)
-					{
-						copiedData = new TagCompound();
-					}
-					if (cache != null)
-					{
-						cache.CopySubworldData();
-						cache.OnExit();
-					}
-
-					CopyMainWorldData();
+					copiedData = new TagCompound();
 				}
-				else
+				if (cache != null)
+				{
+					cache.CopySubworldData();
+					cache.OnExit();
+				}
+
+				CopyMainWorldData();
+			}
+			else
+			{
+				if (index != null)
 				{
 					Netplay.Connection.State = 3;
-					cache?.OnExit();
 				}
+				cache?.OnExit();
 			}
 
 			Main.invasionProgress = -1;
@@ -1219,6 +1390,10 @@ namespace SubworldLibrary
 
 			if (index == null)
 			{
+				if (netMode != 1)
+				{
+					CacheWorldData();
+				}
 				cache = null;
 				Main.menuMode = 0;
 				return;
@@ -1336,26 +1511,6 @@ namespace SubworldLibrary
 			WorldFile.SetOngoingToTemps();
 			Main.resetClouds = true;
 			Main.gameMenu = false;
-		}
-
-		private static void OnEnterWorld(Player player)
-		{
-			if (Main.netMode == 1)
-			{
-				cache?.OnUnload();
-				current?.OnLoad();
-			}
-			cache = current;
-		}
-
-		private static void OnDisconnect()
-		{
-			if (current != null || cache != null)
-			{
-				Main.menuMode = 14;
-			}
-			current = null;
-			cache = null;
 		}
 
 		private static void LoadSubworld(string path, bool cloud)

@@ -298,12 +298,23 @@ namespace SubworldLibrary
 						c.Emit(Ldsfld, typeof(NetMessage).GetField("buffer"));
 						c.Emit(Ldarg_0);
 						c.Emit(Ldelem_Ref);
+						c.Emit(Ldloc, index);
+						c.Emit(OpCodes.Call, typeof(SubworldLibrary).GetMethod("InterceptFreeze", BindingFlags.NonPublic | BindingFlags.Static));
+						var skip = c.DefineLabel();
+						c.Emit(Brtrue, skip);
+						cc.MarkLabel(skip);
+
+						c.Emit(Ldsfld, typeof(NetMessage).GetField("buffer"));
+						c.Emit(Ldarg_0);
+						c.Emit(Ldelem_Ref);
 						c.Emit(Ldloc_2);
 						c.Emit(Ldloc, index);
 						c.Emit(OpCodes.Call, typeof(SubworldLibrary).GetMethod("DenyRead", BindingFlags.NonPublic | BindingFlags.Static));
 
 						var label = c.DefineLabel();
 						c.Emit(Brtrue, label);
+
+						cc.MoveAfterLabels();
 
 						cc.MarkLabel(label);
 
@@ -314,16 +325,22 @@ namespace SubworldLibrary
 
 					IL_Netplay.UpdateConnectedClients += il =>
 					{
-						var c = new ILCursor(il);
-						if (!c.TryGotoNext(MoveType.After, i => i.MatchCallvirt(typeof(RemoteClient), "Reset"))
-						|| !c.Instrs[c.Index].MatchLdloc(out int index))
+						ILCursor c, cc;
+						if (!(c = new ILCursor(il)).TryGotoNext(MoveType.After, i => i.MatchCallvirt(typeof(RemoteClient), "Reset"))
+						|| !(cc = c.Clone()).TryGotoPrev(i => i.MatchStfld(typeof(RemoteClient), "State")))
 						{
 							Logger.Error("FAILED:");
 							return;
 						}
+						c.MoveAfterLabels();
 
-						c.Emit(Ldloc, index);
+						c.Emit(Ldloc_1);
 						c.Emit(OpCodes.Call, typeof(SubworldSystem).GetMethod("SyncDisconnect", BindingFlags.NonPublic | BindingFlags.Static));
+
+						cc.MoveAfterLabels();
+
+						cc.Emit(Ldloc_1);
+						cc.Emit(OpCodes.Call, typeof(SubworldSystem).GetMethod("AllowAutoShutdown", BindingFlags.NonPublic | BindingFlags.Static));
 					};
 
 					return;
@@ -697,11 +714,18 @@ namespace SubworldLibrary
 
 			byte[] data = stream.GetBuffer();
 
-			lock (NetMessage.buffer[256])
+			MessageBuffer serverBuffer = NetMessage.buffer[256];
+			lock (serverBuffer)
 			{
-				Buffer.BlockCopy(data, 1, NetMessage.buffer[256].readBuffer, NetMessage.buffer[256].totalData, data.Length - 1);
-				NetMessage.buffer[256].totalData += data.Length - 1;
-				NetMessage.buffer[256].checkBytes = true;
+				while (serverBuffer.totalData + data.Length > serverBuffer.readBuffer.Length)
+				{
+					Monitor.Exit(serverBuffer);
+					Thread.Yield();
+					Monitor.Enter(serverBuffer);
+				}
+				Buffer.BlockCopy(data, 1, serverBuffer.readBuffer, serverBuffer.totalData, data.Length - 1);
+				serverBuffer.totalData += data.Length - 1;
+				serverBuffer.checkBytes = true;
 			}
 
 			for (int i = 0; i < SubworldSystem.subworlds.Count; i++)
@@ -731,10 +755,7 @@ namespace SubworldLibrary
 				// only read commands where they were sent from
 				if (command != "Say")
 				{
-					byte[] original = new byte[length + 1];
-					original[0] = (byte)buffer.whoAmI;
-					Buffer.BlockCopy(buffer.readBuffer, start, original, 1, length);
-					SubworldSystem.subworlds[sentFrom].link?.Send(original);
+					SubworldSystem.subworlds[sentFrom].link?.Send(buffer.readBuffer, start, length, (byte)buffer.whoAmI);
 					return;
 				}
 			}
@@ -809,10 +830,7 @@ namespace SubworldLibrary
 					continue;
 				}
 
-				byte[] original = new byte[length + 1];
-				original[0] = (byte)buffer.whoAmI;
-				Buffer.BlockCopy(buffer.readBuffer, start, original, 1, length);
-				SubworldSystem.subworlds[i].link?.Send(original);
+				SubworldSystem.subworlds[i].link?.Send(buffer.readBuffer, start, length, (byte)buffer.whoAmI);
 			}
 		}
 
@@ -850,10 +868,7 @@ namespace SubworldLibrary
 
 			Netplay.Clients[buffer.whoAmI].TimeOutTimer = 0;
 
-			byte[] packet = new byte[length + 1];
-			packet[0] = (byte)buffer.whoAmI;
-			Buffer.BlockCopy(buf, start, packet, 1, length);
-			SubworldSystem.subworlds[id].link?.Send(packet);
+			SubworldSystem.subworlds[id].link?.Send(buf, start, length, (byte)buffer.whoAmI);
 
 			return true;
 		}
@@ -1063,7 +1078,7 @@ namespace SubworldLibrary
 			{
 				ushort id = reader.ReadUInt16();
 
-				// it may be best to set this at the end of the update cycle
+				// might be better to set this at the end of the update cycle?
 				SubworldSystem.current = id < ushort.MaxValue ? SubworldSystem.subworlds[id] : null;
 
 				Main.menuMode = 10;
@@ -1115,6 +1130,17 @@ namespace SubworldLibrary
 			{
 				FileUtilities.Delete(path, world.IsCloudSave);
 			}
+		}
+
+		private static bool InterceptFreeze(MessageBuffer buffer, int length)
+		{
+			if (length < 2)
+			{
+				buffer.totalData = 0;
+				buffer.checkBytes = false;
+				return true;
+			}
+			return false;
 		}
 	}
 }

@@ -1,6 +1,9 @@
 ﻿using System;
+using System.IO;
 using System.IO.Pipes;
+using System.Threading;
 using Terraria;
+using Terraria.ModLoader.IO;
 
 namespace SubworldLibrary
 {
@@ -8,14 +11,21 @@ namespace SubworldLibrary
 	{
 		private NamedPipeServerStream pipeOut;
 		private NamedPipeServerStream pipeIn;
-		private byte[] queue;
-		private bool _connected;
 
-		public SubserverLink(string name, byte[] queue)
+		private bool _connected;
+		private byte[] queue;
+		private int totalData;
+
+		public SubserverLink(string name, TagCompound data)
 		{
+			using MemoryStream stream = new MemoryStream(131070);
+
 			pipeOut = new NamedPipeServerStream(name + ".OUT", PipeDirection.In);
 			pipeIn = new NamedPipeServerStream(name + ".IN", PipeDirection.Out);
-			this.queue = queue;
+
+			TagIO.ToStream(data, stream);
+			queue = stream.GetBuffer();
+			totalData = (int)stream.Length;
 		}
 
 		public bool Connected => _connected;
@@ -30,18 +40,53 @@ namespace SubworldLibrary
 
 		public void Send(byte[] data)
 		{
-			if (_connected)
+			if (!_connected)
 			{
-				pipeIn.Write(data);
+				return;
+			}
+			lock (queue)
+			{
+				while (totalData + data.Length > queue.Length)
+				{
+					Monitor.Exit(queue);
+					Thread.Yield();
+					Monitor.Enter(queue);
+				}
+				Buffer.BlockCopy(data, 0, queue, totalData, data.Length);
+				totalData += data.Length;
 			}
 		}
 
-		public void ConnectAndSend()
+		public void Send(byte[] data, int offset, int length, byte client)
 		{
-			pipeIn.WaitForConnection();
+			if (!_connected)
+			{
+				return;
+			}
+			lock (queue)
+			{
+				while (totalData + length >= queue.Length)
+				{
+					Monitor.Exit(queue);
+					Thread.Yield();
+					Monitor.Enter(queue);
+				}
+				queue[totalData] = client;
+				Buffer.BlockCopy(data, offset, queue, totalData + 1, length);
+				totalData += length + 1;
+			}
+		}
 
-			pipeIn.Write(queue);
-			queue = null;
+		public void ConnectAndSend(object id)
+		{
+			try
+			{
+				SendLoop((int)id);
+			}
+			finally
+			{
+				SubworldSystem.StopSubserver((int)id);
+			}
 		}
 
 		public void ConnectAndRead(object id)
@@ -92,11 +137,18 @@ namespace SubworldLibrary
 				if (packetInfo[0] == 255 && data[2] == 255)
 				{
 					// this packet actually came from a subserver, put it in message buffer 256 for reading on the main thread
-					lock (NetMessage.buffer[256])
+					MessageBuffer buffer = NetMessage.buffer[256];
+					lock (buffer)
 					{
-						Buffer.BlockCopy(data, 0, NetMessage.buffer[256].readBuffer, NetMessage.buffer[256].totalData, length);
-						NetMessage.buffer[256].totalData += length;
-						NetMessage.buffer[256].checkBytes = true;
+						while (buffer.totalData + length > buffer.readBuffer.Length)
+						{
+							Monitor.Exit(buffer);
+							Thread.Yield();
+							Monitor.Enter(buffer);
+						}
+						Buffer.BlockCopy(data, 0, buffer.readBuffer, buffer.totalData, length);
+						buffer.totalData += length;
+						buffer.checkBytes = true;
 					}
 					continue;
 				}
@@ -106,6 +158,37 @@ namespace SubworldLibrary
 				{
 					Netplay.Clients[packetInfo[0]].Socket.AsyncSend(data, 0, length, (state) => { });
 				}
+			}
+		}
+
+		private void SendLoop(int id)
+		{
+			pipeIn.WaitForConnection();
+
+			int sleep = 0;
+			while (pipeIn.IsConnected && !Netplay.Disconnect)
+			{
+				if (totalData <= 0)
+				{
+					// vanilla's server loop does this, not sure what the nuance here is
+					if (++sleep == 10)
+					{
+						Thread.Sleep(1);
+						sleep = 0;
+						continue;
+					}
+					Thread.Sleep(0);
+					continue;
+				}
+
+				byte[] data;
+				lock (queue)
+				{
+					data = new byte[totalData];
+					Buffer.BlockCopy(queue, 0, data, 0, totalData);
+					totalData = 0;
+				}
+				pipeIn.Write(data, 0, data.Length);
 			}
 		}
 	}
