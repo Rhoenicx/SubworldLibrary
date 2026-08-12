@@ -253,6 +253,8 @@ namespace SubworldLibrary
 						return;
 					}
 					c.Emit(OpCodes.Call, typeof(SubworldSystem).GetMethod("CheckBytes", BindingFlags.NonPublic | BindingFlags.Static));
+					// no-ops on subservers; see UpdateRejoiningPlayers
+					c.Emit(OpCodes.Call, typeof(SubworldSystem).GetMethod("UpdateRejoiningPlayers", BindingFlags.NonPublic | BindingFlags.Static));
 				};
 
 				// these are effectively not called on subservers, no need to patch them
@@ -1069,8 +1071,13 @@ namespace SubworldLibrary
 				{
 					SubworldSystem.FinishMove(whoAmI);
 				}
-				else if (!SubworldSystem.noReturn)
+				else if (!SubworldSystem.noReturn && Netplay.Clients[whoAmI].State == 10)
 				{
+					// A client that has not finished joining cannot legitimately ask to move - a real
+					// request is always sent from a fully joined client. Without the state check, a
+					// duplicate or late ack arriving after FinishMove starts a whole new move for a
+					// client that is still replaying the join handshake, deactivating it again partway
+					// through and leaving it desynced for everyone.
 					SubworldSystem.MovePlayerToSubserver(whoAmI, id);
 				}
 			}

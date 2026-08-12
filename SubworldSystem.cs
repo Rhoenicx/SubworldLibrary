@@ -82,6 +82,13 @@ namespace SubworldLibrary
 		internal static int[] pendingMoves;
 		internal static HashSet<ISocket> deniedSockets;
 
+		// players who have been dropped back to State 1 by FinishMove and are replaying the vanilla
+		// join handshake against the main server. See UpdateRejoiningPlayers.
+		internal static bool[] rejoining;
+		// set while a player is rejoining if any other player was mid-transition at the same time,
+		// which is the window where join syncs get dropped in both directions.
+		internal static bool[] rejoinNeedsResync;
+
 		internal static NamedPipeClientStream pipeIn;
 		internal static NamedPipeClientStream pipeOut;
 		internal static byte[] queue;
@@ -96,6 +103,9 @@ namespace SubworldLibrary
 
 			pendingMoves = new int[256];
 			Array.Fill(pendingMoves, -1);
+
+			rejoining = new bool[256];
+			rejoinNeedsResync = new bool[256];
 
 			deniedSockets = new HashSet<ISocket>();
 
@@ -375,6 +385,10 @@ namespace SubworldLibrary
 
 			pendingMoves[player] = id;
 
+			// a new move supersedes any handshake we were still waiting on
+			rejoining[player] = false;
+			rejoinNeedsResync[player] = false;
+
 			ModPacket packet = ModContent.GetInstance<SubworldLibrary>().GetPacket();
 			packet.Write(id);
 			packet.Send(player);
@@ -423,6 +437,16 @@ namespace SubworldLibrary
 				playerLocations[player] = -1;
 				deniedSockets.Remove(client.Socket);
 
+				// Main.player[player].active and Netplay.Clients[player].State must never disagree.
+				// NetMessage.SyncConnectedPlayer gates on the former, NetMessage.SyncOnePlayer gates on
+				// the latter, and when they disagree SyncOnePlayer falls into its disconnect branch,
+				// which does SendData(14, -1, ...) - a broadcast of PlayerActive=false for this player
+				// to every client, ignoring its own toWho argument. Clearing active here keeps the pair
+				// consistent for the whole handshake, so the player is merely skipped instead.
+				Main.player[player].active = false;
+				rejoining[player] = true;
+				rejoinNeedsResync[player] = false;
+
 				client.State = 1;
 				client.ResetSections();
 
@@ -447,8 +471,110 @@ namespace SubworldLibrary
 			pendingMoves[player] = -1;
 		}
 
+		/// <summary>
+		/// Finishes the vanilla join handshake for players returning to the main world, and repairs it
+		/// when it is left half-done.
+		/// <para/>
+		/// FinishMove drops a returning client to State 1 so it replays the vanilla handshake
+		/// (4 -> 6 -> 8 -> 12). Every step only advances if the previous one landed, and there is no
+		/// vanilla retry. Two things then go wrong:
+		/// <list type="bullet">
+		/// <item>MessageBuffer case 12 calls Player.Spawn - which sets Main.player[i].active - before it
+		/// checks the connection state, so a dropped or reordered handshake packet leaves the server
+		/// holding active == true with State &lt; 10. Vanilla only relays PlayerControls when
+		/// State == 10, so the player stops moving for everyone, and every later
+		/// SyncConnectedPlayer call routes them through SyncOnePlayer's disconnect branch, which
+		/// broadcasts PlayerActive=false for them to all clients. They go invisible in world and on
+		/// the map, permanently, with no vanilla path back.</item>
+		/// <item>Even on a clean handshake, join syncs exchanged while another player was mid-transition
+		/// are lost: SyncConnectedPlayer skips players whose active flag is currently false, and
+		/// anything sent to the returning client before its ExitWorldCallBack runs is wiped by that
+		/// method's own "deactivate everyone else" loop.</item>
+		/// </list>
+		/// </summary>
+		internal static void UpdateRejoiningPlayers()
+		{
+			if (Main.netMode != 2 || current != null)
+			{
+				return;
+			}
+
+			for (int i = 0; i < 255; i++)
+			{
+				if (!rejoining[i])
+				{
+					continue;
+				}
+
+				RemoteClient client = Netplay.Clients[i];
+
+				// gone again before finishing: a disconnect, or another move started
+				if (!client.IsConnected() || pendingMoves[i] >= 0 || playerLocations[i] >= 0)
+				{
+					rejoining[i] = false;
+					rejoinNeedsResync[i] = false;
+					continue;
+				}
+
+				if (client.State == 10)
+				{
+					rejoining[i] = false;
+
+					if (rejoinNeedsResync[i])
+					{
+						rejoinNeedsResync[i] = false;
+
+						// Idempotent: re-broadcasts us to everyone and re-sends everyone to us, covering
+						// whatever was dropped while the transitions overlapped.
+						NetMessage.SyncConnectedPlayer(i);
+					}
+
+					continue;
+				}
+
+				if (Main.player[i].active)
+				{
+					// Case 12 ran but the state machine was behind it, so vanilla skipped the
+					// State = 10 transition and the join sync with it. Only Player.Spawn sets active
+					// server-side (case 14 is client-only), so this is unambiguous. Do what case 12
+					// would have done rather than leave the player permanently desynced.
+					client.State = 10;
+					NetMessage.buffer[i].broadcast = true;
+
+					rejoining[i] = false;
+					rejoinNeedsResync[i] = false;
+
+					NetMessage.SyncConnectedPlayer(i);
+					continue;
+				}
+
+				// Still handshaking. If anyone else is mid-transition right now, the join syncs
+				// between us and them are being dropped, so flag a resync for when we land.
+				if (!rejoinNeedsResync[i] && AnyOtherPlayerIsMoving(i))
+				{
+					rejoinNeedsResync[i] = true;
+				}
+			}
+		}
+
+		private static bool AnyOtherPlayerIsMoving(int player)
+		{
+			for (int i = 0; i < 255; i++)
+			{
+				if (i != player && (pendingMoves[i] >= 0 || rejoining[i]))
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+
 		private static void SyncDisconnect(int player)
 		{
+			rejoining[player] = false;
+			rejoinNeedsResync[player] = false;
+
 			if (playerLocations[player] >= 0)
 			{
 				subworlds[playerLocations[player]].link?.Send(GetDisconnectPacket(player, ModContent.GetInstance<SubworldLibrary>().NetID));
