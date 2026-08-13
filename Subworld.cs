@@ -14,6 +14,9 @@ using Terraria.WorldBuilding;
 
 namespace SubworldLibraryCommunityFork
 {
+	/// <summary>
+	/// Defines callbacks for copying persistent data between the main world and subworlds.
+	/// </summary>
 	public interface ICopyWorldData : ILoadable
 	{
 		/// <summary>
@@ -31,20 +34,33 @@ namespace SubworldLibraryCommunityFork
 		void ReadCopiedMainWorldData() { }
 	}
 
+	/// <summary>
+	/// Defines a world managed independently from Terraria's main world.
+	/// </summary>
 	public abstract class Subworld : ModType, ICopyWorldData, ILocalizedModType
 	{
+		/// <inheritdoc />
 		public string LocalizationCategory => "Subworlds";
+
+		/// <summary>
+		/// Gets the localized display name shown for this subworld.
+		/// </summary>
 		public virtual LocalizedText DisplayName => this.GetLocalization(nameof(DisplayName), PrettyPrintName);
 
+		/// <inheritdoc />
 		protected sealed override void Register()
 		{
 			ModTypeLookup<Subworld>.Register(this);
 			SubworldSystem.subworlds.Add(this);
 		}
+		/// <inheritdoc />
 		public sealed override void SetupContent() => SetStaticDefaults();
 
 		internal SubserverLink link;
 
+		/// <summary>
+		/// Gets the file name used to persist this subworld.
+		/// </summary>
 		public string FileName => Mod.Name + "_" + Name;
 
 		/// <summary>
@@ -59,6 +75,9 @@ namespace SubworldLibraryCommunityFork
 		/// The subworld's generation tasks.
 		/// </summary>
 		public abstract List<GenPass> Tasks { get; }
+		/// <summary>
+		/// Gets the world-generation configuration supplied to this subworld's generation passes.
+		/// </summary>
 		public virtual WorldGenConfiguration Config => null;
 		/// <summary>
 		/// The index of the subworld the player will be sent to when choosing to return. See <see cref="SubworldSystem.GetIndex{T}"/>.
@@ -104,6 +123,7 @@ namespace SubworldLibraryCommunityFork
 		/// <br/>This can be used to make things happen in the subworld.
 		/// </summary>
 		public virtual void Update() { }
+		/// <inheritdoc />
 		public virtual void CopyMainWorldData() { }
 		/// <summary>
 		/// Called before <see cref="OnExit"/>.
@@ -111,6 +131,7 @@ namespace SubworldLibraryCommunityFork
 		/// <code>SubworldSystem.CopyWorldData(nameof(DownedSystem.downedBoss), DownedSystem.downedBoss);</code>
 		/// </summary>
 		public virtual void CopySubworldData() { }
+		/// <inheritdoc />
 		public virtual void ReadCopiedMainWorldData() { }
 		/// <summary>
 		/// Called while leaving the subworld, either before a different world generates, or after a different world loads from file.

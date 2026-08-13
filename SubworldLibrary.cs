@@ -14,6 +14,7 @@ namespace SubworldLibraryCommunityFork
 {
 	public partial class SubworldLibrary : Mod
 	{
+		/// <inheritdoc />
 		public override void Load()
 		{
 			if (ModLoader.HasMod("SubworldLibrary"))
@@ -44,6 +45,7 @@ namespace SubworldLibraryCommunityFork
 			RegisterWorldDeletionHook();
 		}
 
+		/// <inheritdoc />
 		public override object Call(params object[] args)
 		{
 			try
@@ -106,9 +108,10 @@ namespace SubworldLibraryCommunityFork
 		// when a client is in a subworld, all packets sent to and from them are relayed to the subserver belonging to that subworld (see DenyRead)
 		// sublib packets are never relayed to subservers automatically, but may be sent to them by sublib directly
 		// subservers send packets to the main server via SubserverSocket
+		/// <inheritdoc />
 		public override void HandlePacket(BinaryReader reader, int whoAmI)
 		{
-			if (Main.netMode == 2)
+			if (Main.netMode == NetmodeID.Server)
 			{
 				// packet came from a sub/server
 				if (whoAmI == 256)
