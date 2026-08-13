@@ -19,8 +19,8 @@ namespace SubworldLibraryCommunityFork
 		{
 			FieldInfo current = typeof(SubworldSystem).GetField("current", BindingFlags.NonPublic | BindingFlags.Static);
 			FieldInfo cache = typeof(SubworldSystem).GetField("cache", BindingFlags.NonPublic | BindingFlags.Static);
-			FieldInfo hideUnderworld = typeof(SubworldSystem).GetField("_hideUnderworld", BindingFlags.NonPublic | BindingFlags.Static);
-			FieldInfo noReturn = typeof(SubworldSystem).GetField("_noReturn", BindingFlags.NonPublic | BindingFlags.Static);
+			FieldInfo hideUnderworld = typeof(SubworldSystem).GetField("hideUnderworld");
+			FieldInfo noReturn = typeof(SubworldSystem).GetField("noReturn");
 
 			IL_Main.DoDraw += il =>
 			{
