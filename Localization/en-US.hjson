@@ -1,4 +1,6 @@
-Mods.SubworldLibraryCommunityFork: {
-	Return: Return
-	Move: "{0} has gone to {1}."
+Mods: {
+	SubworldLibraryCommunityFork: {
+		Return: Return
+		Move: "{0} has gone to {1}."
+	}
 }

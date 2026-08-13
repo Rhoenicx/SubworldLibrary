@@ -17,7 +17,7 @@ namespace SubworldLibraryCommunityFork
 		/// <inheritdoc />
 		public override void Load()
 		{
-			if (ModLoader.HasMod("SubworldLibrary"))
+			if (ModLoader.TryGetMod("SubworldLibrary", out Mod originalSubworldLibrary) && originalSubworldLibrary != this)
 			{
 				throw new InvalidOperationException(
 					"SubworldLibraryCommunityFork cannot be enabled alongside the original SubworldLibrary mod. " +

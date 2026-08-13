@@ -1,4 +1,6 @@
-Mods.SubworldLibraryCommunityFork: {
-	Return: Sair do Submundo
-	Move: "{0} foi para {1}."
+Mods: {
+	SubworldLibraryCommunityFork: {
+		Return: Sair do Submundo
+		Move: "{0} foi para {1}."
+	}
 }

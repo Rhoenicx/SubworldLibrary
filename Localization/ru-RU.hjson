@@ -1,4 +1,6 @@
-Mods.SubworldLibraryCommunityFork: {
-	Return: Покинуть подмир
-	Move: "{0} отправился в {1}."
+Mods: {
+	SubworldLibraryCommunityFork: {
+		Return: Покинуть подмир
+		Move: "{0} отправился в {1}."
+	}
 }

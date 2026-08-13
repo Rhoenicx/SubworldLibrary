@@ -17,7 +17,7 @@ The Workshop name, assembly name, and internal tModLoader dependency ID are `Sub
 
 The public C# namespace is `SubworldLibraryCommunityFork`, matching the internal tModLoader package ID as required by tModLoader. Integrations must update their `using SubworldLibrary;` directives to `using SubworldLibraryCommunityFork;` in addition to changing the dependency ID and assembly reference. API type names such as `Subworld` and `SubworldSystem` remain unchanged.
 
-The original `SubworldLibrary` and `SubworldLibraryCommunityFork` must not be enabled together because both install hooks for the same Terraria systems. The fork sorts after the original and stops loading with a clear error that asks the user to disable the original.
+The original `SubworldLibrary` and `SubworldLibraryCommunityFork` must not be enabled together because both install hooks for the same Terraria systems. The fork checks for the original and stops loading with a clear error that asks the user to disable it. This check does not create a load-order dependency on the original mod.
 
 ## Migrating from Subworld Library
 
