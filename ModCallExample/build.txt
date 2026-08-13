@@ -1,4 +1,4 @@
-displayName = Mod.Call ExampleMod for SubworldLibraryCommunityFork
+displayName = Mod.Call ExampleMod for Subworld Library Community Edition
 author = direwolf420
 version = 0.2
 hideCode = false
