@@ -13,6 +13,7 @@ namespace SubworldLibraryCommunityFork
 		private NamedPipeServerStream pipeIn;
 
 		private bool _connected;
+		private bool _closed;
 		private byte[] queue;
 		private int totalData;
 
@@ -30,8 +31,11 @@ namespace SubworldLibraryCommunityFork
 
 		public bool Connected => _connected;
 
+		public bool Closed => _closed;
+
 		public void Close()
 		{
+			_closed = true;
 			_connected = false;
 
 			pipeOut.Close();

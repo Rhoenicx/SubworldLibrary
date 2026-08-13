@@ -296,19 +296,20 @@ namespace SubworldLibraryCommunityFork
 				args += " -secure";
 			}
 
+			copiedData = [];
+			CopyMainWorldData();
+
+			var link = new SubserverLink(name, copiedData);
+			subworld.link = link;
+			copiedData = null;
+
 			Process p = new Process();
 			p.StartInfo.FileName = Environment.ProcessPath!;
 			p.StartInfo.Arguments = args;
 			p.StartInfo.UseShellExecute = true;
 			p.EnableRaisingEvents = true;
-			p.Exited += (_, _) => { StopSubserver(id); }; // ensures the main server recognizes a subserver as stopped even if it crashes before the pipes can connect
+			p.Exited += (_, _) => { if (!link.Closed) { StopSubserver(id); } }; // ensures the main server recognizes a subserver as stopped even if it crashes before the pipes can connect
 			p.Start();
-
-			copiedData = new TagCompound();
-			CopyMainWorldData();
-
-			subworld.link = new SubserverLink(name, copiedData);
-			copiedData = null;
 
 			new Thread(subworld.link.ConnectAndRead)
 			{
