@@ -34,7 +34,7 @@ namespace ModCallExample
 					string message;
 					if (!SubworldManager.Loaded)
 					{
-						message = "SubworldLibrary Mod is required to be enabled for this item to work!";
+						message = "SubworldLibraryCommunityFork is required to be enabled for this item to work!";
 					}
 					else
 					{

@@ -47,7 +47,7 @@ namespace ModCallExample
 
 		public override void PostSetupContent()
 		{
-			if (ModLoader.TryGetMod("SubworldLibrary", out Mod subworldLibrary))
+			if (ModLoader.TryGetMod("SubworldLibraryCommunityFork", out Mod subworldLibrary))
 			{
 				object result = subworldLibrary.Call(
 					"Register",

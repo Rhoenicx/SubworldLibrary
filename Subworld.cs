@@ -12,7 +12,7 @@ using Terraria.ModLoader;
 using Terraria.Utilities;
 using Terraria.WorldBuilding;
 
-namespace SubworldLibrary
+namespace SubworldLibraryCommunityFork
 {
 	public interface ICopyWorldData : ILoadable
 	{

@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using Terraria;
 using Terraria.WorldBuilding;
 
-namespace SubworldLibrary
+namespace SubworldLibraryCommunityFork
 {
 	internal class CrossModSubworld : Subworld
 	{

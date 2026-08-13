@@ -5,7 +5,7 @@ using System.Threading;
 using Terraria;
 using Terraria.ModLoader.IO;
 
-namespace SubworldLibrary
+namespace SubworldLibraryCommunityFork
 {
 	internal class SubserverLink
 	{

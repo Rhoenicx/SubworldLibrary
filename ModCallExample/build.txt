@@ -1,8 +1,8 @@
-displayName = Mod.Call ExampleMod for SubworldLibrary
+displayName = Mod.Call ExampleMod for SubworldLibraryCommunityFork
 author = direwolf420
 version = 0.2
 hideCode = false
 hideResources = false
 buildIgnore = *.csproj, *.user, *.md, obj\*, bin\*, .vs\*
-loadAfter = SubworldLibrary
-homepage = https://github.com/jjohnsnaill/SubworldLibrary/wiki
+loadAfter = SubworldLibraryCommunityFork
+homepage = https://github.com/Path-of-Terraria/SubworldLibraryCommunityFork

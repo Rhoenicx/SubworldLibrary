@@ -1,7 +1,8 @@
-displayName=Subworld Library
-author=John Snail
+displayName=SubworldLibraryCommunityFork
+author=Path of Terraria Community (originally by John Snail)
 version=2.2.3.2
-homepage=https://forums.terraria.org/index.php?threads/86283
+homepage=https://github.com/Path-of-Terraria/SubworldLibraryCommunityFork
+sortAfter=SubworldLibrary
 hideCode=true
 hideResources=true
 includeSource=false

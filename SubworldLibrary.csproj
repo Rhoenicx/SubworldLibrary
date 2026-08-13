@@ -1,12 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <Import Project="..\tModLoader.targets" />
-  <PropertyGroup>
-    <AssemblyName>SubworldLibrary</AssemblyName>
-    <LangVersion>latest</LangVersion>
-    <GenerateDocumentationFile>True</GenerateDocumentationFile>
-  </PropertyGroup>
-  <ItemGroup>
-    <None Include="ModCallExample/**/*.cs" />
-    <Compile Remove="ModCallExample/**" />
-  </ItemGroup>
+    <Import Project="..\tModLoader.targets"/>
+    <PropertyGroup>
+        <AssemblyName>SubworldLibraryCommunityFork</AssemblyName>
+        <RootNamespace>SubworldLibraryCommunityFork</RootNamespace>
+        <LangVersion>latest</LangVersion>
+        <GenerateDocumentationFile>True</GenerateDocumentationFile>
+    </PropertyGroup>
+    <ItemGroup>
+        <None Include="ModCallExample/**/*.cs"/>
+        <Compile Remove="ModCallExample/**"/>
+    </ItemGroup>
 </Project>
