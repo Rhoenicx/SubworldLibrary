@@ -1,3 +1,6 @@
-Mods.SubworldLibraryCommunityFork: {
-	Return: Wiederkehren
+Mods: {
+	SubworldLibraryCommunityFork: {
+		Return: Wiederkehren
+		// Move: "{0} has gone to {1}."
+	}
 }

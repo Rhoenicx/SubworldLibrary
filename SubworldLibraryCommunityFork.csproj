@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <Import Project="..\tModLoader.targets"/>
+    <PropertyGroup>
+        <AssemblyName>SubworldLibraryCommunityFork</AssemblyName>
+        <RootNamespace>SubworldLibraryCommunityFork</RootNamespace>
+        <LangVersion>latest</LangVersion>
+        <GenerateDocumentationFile>True</GenerateDocumentationFile>
+        <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+        <CommunityForkModSource>$(MSBuildProjectDirectory)\..\SubworldLibraryCommunityFork</CommunityForkModSource>
+    </PropertyGroup>
+    <ItemGroup>
+        <Compile Include="CrossModSubworld.cs" />
+        <Compile Include="SubserverLink.cs" />
+        <Compile Include="Subworld.cs" />
+        <Compile Include="SubworldLibrary.cs" />
+        <Compile Include="SubworldSystem.cs" />
+        <Compile Include="Hooks/**/*.cs" />
+        <Compile Include="Networking/**/*.cs" />
+        <Compile Include="Systems/**/*.cs" />
+        <Compile Include="Utilities/**/*.cs" />
+        <None Include="ModCallExample/**/*.cs"/>
+    </ItemGroup>
+
+    <!--
+      tModLoader derives a mod's internal name from the source directory passed to -build.
+      Keep packaging on the Community Fork entrypoint even when an IDE opened this checkout
+      through its former SubworldLibrary directory name.
+    -->
+    <Target Name="BuildMod" AfterTargets="Build" Condition="'$(BuildMod)' == 'true'">
+        <Exec Command="dotnet $(tMLServerPath) -build &quot;$(CommunityForkModSource)&quot; -eac &quot;$(TargetPath)&quot; -define &quot;$(DefineConstants)&quot; -unsafe $(AllowUnsafeBlocks) $(ExtraBuildModFlags)" WorkingDirectory="$(tMLSteamPath)" />
+    </Target>
+</Project>

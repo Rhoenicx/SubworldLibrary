@@ -1,0 +1,45 @@
+Subworld Library Community Edition is an API that helps mod developers add alternate dimensions, known as subworlds, to Terraria. It supplies the required game integration, manages each subworld, and handles loading, saving, player travel, and multiplayer routing.
+
+This community-maintained edition continues John Snail's original Subworld Library with compatibility updates, bug fixes, and community-reviewed improvements for current tModLoader releases.
+
+IMPORTANT
+
+This mod replaces the original Subworld Library. Do not enable SubworldLibrary and SubworldLibraryCommunityFork together.
+
+Mods must explicitly support the Community Edition. For developers, both the dependency ID and C# namespace are SubworldLibraryCommunityFork. API types such as Subworld and SubworldSystem keep their existing names.
+
+SOURCE CODE AND ISSUE TRACKER
+
+https://github.com/Path-of-Terraria/SubworldLibraryCommunityFork
+
+Original forum thread:
+https://forums.terraria.org/index.php?threads/86283
+
+Original wiki and API documentation:
+https://github.com/jjohnsnaill/SubworldLibrary/wiki
+
+HOW IT WORKS
+
+Terraria was not designed to support multiple dimensions, so Subworld Library applies targeted runtime integrations to create and manage them.
+
+Subworlds are highly customizable. Mods can control their dimensions, world-generation tasks, persistence, update behavior, lighting, audio, and loading interface.
+
+Space, both oceans, and the Underworld are removed from subworlds, allowing them to be much smaller than ordinary Terraria worlds without requiring the full vanilla world layout.
+
+LOADING
+
+Entering a subworld can use anything from a simple text loading screen to a more elaborate interactive interface, such as an item-selection menu.
+
+SAVING
+
+Saved subworlds are stored beneath their associated main world. A subworld, or changes made to players while inside it, can be configured as temporary. Deleting the main world also removes its associated subworld data.
+
+MULTIPLAYER
+
+Subworld Library handles most multiplayer integration for mod developers. When a subworld is occupied, the library starts a subserver and routes the relevant players between it and the main server.
+
+CREDITS
+
+Subworld Library was originally created by John Snail (jjohnsnaill). Full credit for the original project, design, and implementation belongs to him.
+
+The Community Edition is maintained by the Path of Terraria community and its contributors.
