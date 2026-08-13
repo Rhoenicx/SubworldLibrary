@@ -7,6 +7,7 @@ using System.Threading;
 using Terraria;
 using Terraria.Chat;
 using Terraria.GameContent.NetModules;
+using Terraria.ID;
 using Terraria.Localization;
 using Terraria.ModLoader;
 using Terraria.Net;
@@ -264,7 +265,7 @@ namespace SubworldLibraryCommunityFork
 				{
 					client.Reset();
 
-					NetMessage.SendData(14, -1, i, null, i, 0);
+					NetMessage.SendData(MessageID.PlayerActive, -1, i, null, i, 0);
 					ChatHelper.BroadcastChatMessage(NetworkText.FromKey(Lang.mp[20].Key, client.Name), new Color(255, 240, 20), i);
 					Player.Hooks.PlayerDisconnect(i);
 

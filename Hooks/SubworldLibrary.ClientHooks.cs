@@ -10,6 +10,9 @@ using static Mono.Cecil.Cil.OpCodes;
 
 namespace SubworldLibraryCommunityFork
 {
+	/// <summary>
+	/// Provides the community fork's tModLoader entry point and runtime integration hooks.
+	/// </summary>
 	public partial class SubworldLibrary
 	{
 		private void RegisterClientHooks()
@@ -17,6 +20,7 @@ namespace SubworldLibraryCommunityFork
 			FieldInfo current = typeof(SubworldSystem).GetField("current", BindingFlags.NonPublic | BindingFlags.Static);
 			FieldInfo cache = typeof(SubworldSystem).GetField("cache", BindingFlags.NonPublic | BindingFlags.Static);
 			FieldInfo hideUnderworld = typeof(SubworldSystem).GetField("hideUnderworld");
+			FieldInfo noReturn = typeof(SubworldSystem).GetField("noReturn");
 
 			IL_Main.DoDraw += il =>
 			{
@@ -151,7 +155,7 @@ namespace SubworldLibraryCommunityFork
 				ccc.Index += 6;
 				ccc.MarkLabel(label);
 
-				cccc.Emit(Ldsfld, typeof(SubworldSystem).GetField("noReturn"));
+				cccc.Emit(Ldsfld, noReturn);
 				cccc.Emit(Brtrue, label);
 
 				c.Emit(Ldsfld, current);

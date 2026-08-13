@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Threading;
 using Terraria;
 using Terraria.Chat;
+using Terraria.ID;
 using Terraria.Localization;
 using Terraria.ModLoader;
 using Terraria.ModLoader.IO;
@@ -39,7 +40,7 @@ namespace SubworldLibraryCommunityFork
 				// this respects the vanilla call order
 
 				Main.player[player].active = false;
-				NetMessage.SendData(14, -1, player, null, player, 0);
+			NetMessage.SendData(MessageID.PlayerActive, -1, player, null, player, 0);
 				ChatHelper.BroadcastChatMessage(NetworkText.FromKey("Mods.SubworldLibraryCommunityFork.Move", Netplay.Clients[player].Name, subworlds[id].DisplayName), new Color(255, 240, 20), player);
 				Player.Hooks.PlayerDisconnect(player);
 			}
@@ -130,7 +131,7 @@ namespace SubworldLibraryCommunityFork
 		/// </summary>
 		internal static void UpdateRejoiningPlayers()
 		{
-			if (Main.netMode != 2 || current != null)
+			if (Main.netMode != NetmodeID.Server || current != null)
 			{
 				return;
 			}
@@ -296,7 +297,7 @@ namespace SubworldLibraryCommunityFork
 			}
 
 			Process p = new Process();
-			p.StartInfo.FileName = Process.GetCurrentProcess().MainModule!.FileName;
+			p.StartInfo.FileName = Environment.ProcessPath!;
 			p.StartInfo.Arguments = args;
 			p.StartInfo.UseShellExecute = true;
 			p.EnableRaisingEvents = true;

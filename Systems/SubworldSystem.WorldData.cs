@@ -7,6 +7,7 @@ using Terraria.GameContent;
 using Terraria.GameContent.Bestiary;
 using Terraria.GameContent.Creative;
 using Terraria.GameContent.Events;
+using Terraria.ID;
 using Terraria.ModLoader;
 using Terraria.ModLoader.IO;
 using Terraria.Social;
@@ -67,7 +68,7 @@ namespace SubworldLibraryCommunityFork
 
 		private static void CopyMainWorldData()
 		{
-			copiedData["!mainId"] = (Main.netMode != 2 || current != null) ? main.UniqueId.ToByteArray() : Main.ActiveWorldFileData.UniqueId.ToByteArray();
+			copiedData["!mainId"] = (Main.netMode != NetmodeID.Server || current != null) ? main.UniqueId.ToByteArray() : Main.ActiveWorldFileData.UniqueId.ToByteArray();
 			copiedData["!seed"] = Main.ActiveWorldFileData.SeedText;
 			copiedData["!gameMode"] = Main.ActiveWorldFileData.GameMode;
 			copiedData["!hardMode"] = Main.hardMode;
