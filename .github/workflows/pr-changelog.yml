@@ -18,7 +18,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.POT_GH_APP_APP_ID }}
+          client-id: ${{ secrets.POT_GH_APP_APP_ID }}
           private-key: ${{ secrets.POT_GH_APP_APP_ID }}
 
       - name: Build and post changelog
