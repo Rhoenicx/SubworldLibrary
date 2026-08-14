@@ -338,6 +338,13 @@ namespace SubworldLibraryCommunityFork
 			subworld.link.Close();
 			subworld.link = null;
 
+			// Do not move the players back to the main server when the main server closes.
+			// This prevents clients getting stuck on a loading screen; clients will disconnect naturally.
+			if (Netplay.Disconnect)
+			{
+				return;
+			}
+
 			for (int i = 0; i < 256; i++)
 			{
 				if (playerLocations[i] == id)
