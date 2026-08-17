@@ -113,6 +113,10 @@ namespace SubworldLibraryCommunityFork
 					pipeOut.Write(data, 0, data.Length);
 				}
 			}
+			catch // Server hard crashes without this catch block
+			{
+				// ignore all errors
+			}
 			finally
 			{
 				Netplay.Disconnect = true;
@@ -182,6 +186,10 @@ namespace SubworldLibraryCommunityFork
 						buffer.checkBytes = true;
 					}
 				}
+			}
+			catch // Server hard crashes without this catch block
+			{
+				// ignore all errors
 			}
 			finally
 			{

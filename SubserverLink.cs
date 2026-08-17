@@ -87,6 +87,10 @@ namespace SubworldLibraryCommunityFork
 			{
 				SendLoop((int)id);
 			}
+			catch // Server hard crashes without this catch block
+			{
+				// ignore all errors
+			}
 			finally
 			{
 				SubworldSystem.StopSubserver((int)id);
@@ -98,6 +102,10 @@ namespace SubworldLibraryCommunityFork
 			try
 			{
 				ReadLoop((int)id);
+			}
+			catch // Server hard crashes without this catch block
+			{
+				// ignore all errors
 			}
 			finally
 			{
